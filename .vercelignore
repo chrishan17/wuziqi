@@ -1,0 +1,12 @@
+# This project is not a git repo, so the CLI uploads the directory as-is.
+# Be explicit about what must never leave the machine.
+.env
+.env.local
+.env.*.local
+runs/
+.claude/
+scripts/
+node_modules/
+.next/
+*.tsbuildinfo
+.vercel/

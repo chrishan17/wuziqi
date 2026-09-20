@@ -1,0 +1,119 @@
+/* 文人棋局 — xuan paper, pine-soot ink, aged kaya wood, cinnabar seal. */
+
+:root {
+  /* 宣纸 */
+  --paper:        #e9dfca;
+  --paper-warm:   #f2e9d6;
+  --paper-shade:  #d8cbb0;
+  /* 松烟墨 */
+  --ink:          #16130f;
+  --ink-soft:     #3d362c;
+  --ink-faint:    #6b6152;
+  /* 榧木 */
+  --wood-hi:      #e0b87c;
+  --wood:         #cfa063;
+  --wood-lo:      #b07f47;
+  --wood-edge:    #7d552c;
+  /* 朱砂 / 青瓷 */
+  --cinnabar:     #a32e24;
+  --cinnabar-lit: #c94a36;
+  --celadon:      #6e8a78;
+
+  --grid-line:    rgba(40, 28, 16, 0.62);
+  --rule:         rgba(34, 26, 16, 0.16);
+
+  --serif: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --brush: "Ma Shan Zheng", "Kaiti SC", "STKaiti", cursive;
+}
+
+* { box-sizing: border-box; }
+
+/* Reserve the scrollbar gutter permanently. Without it, the trace card pushing
+   the page past the fold makes a classic scrollbar appear, which narrows the
+   viewport ~15px: `.shell`'s auto margins recentre (~7px), `.field`'s panel
+   column narrows, and `.meta` rewraps. The whole page twitches mid-game.
+   `both-edges` rather than plain `stable`: the shell is centred, and a gutter on
+   the right only would park it 7.5px left of centre forever. */
+html { scrollbar-gutter: stable both-edges; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.75;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Paper: warm radial wash + fibre grain + faint speckle. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(120% 90% at 22% 8%, #f6eeda 0%, transparent 56%),
+    radial-gradient(100% 80% at 88% 96%, #ddd0b4 0%, transparent 60%),
+    var(--paper);
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image:
+    repeating-linear-gradient(94deg, rgba(120, 96, 60, 0.05) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(1deg, rgba(120, 96, 60, 0.04) 0 1px, transparent 1px 7px);
+}
+
+/* ─── motion ─────────────────────────────────────────────── */
+
+/* A stone lands: drops in, settles with a small overshoot. */
+@keyframes stone-fall {
+  0%   { transform: scale(1.55) translateY(-14%); opacity: 0; filter: blur(1.5px); }
+  55%  { transform: scale(0.94) translateY(0);    opacity: 1; filter: blur(0); }
+  78%  { transform: scale(1.035); }
+  100% { transform: scale(1); }
+}
+
+/* 墨晕 — ink blooming outward into the paper, then drying. */
+@keyframes ink-bloom {
+  0%   { transform: scale(0.35); opacity: 0.55; }
+  70%  { opacity: 0.16; }
+  100% { transform: scale(3.6);  opacity: 0; }
+}
+
+/* Second, slower ring: the wet edge chasing the first. */
+@keyframes ink-bloom-slow {
+  0%   { transform: scale(0.5); opacity: 0.3; }
+  100% { transform: scale(5.2); opacity: 0; }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+/* The winning line, lit like wet ink catching light. */
+@keyframes victory-glow {
+  0%, 100% { box-shadow: 0 0 0 2px var(--cinnabar), 0 2px 5px rgba(0,0,0,.45); }
+  50%      { box-shadow: 0 0 0 3px var(--cinnabar-lit), 0 0 16px 3px rgba(201,74,54,.65), 0 2px 5px rgba(0,0,0,.45); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

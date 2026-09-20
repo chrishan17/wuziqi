@@ -1,0 +1,468 @@
+/* 什么是 Jev — the explainer page. Same 文人棋局 vocabulary as board.css;
+   everything here is CSS-only motion so the route stays static. */
+
+.prose { max-width: 720px; margin: 0 auto; }
+
+.lede {
+  font-size: clamp(15px, 3.4vw, 17px);
+  line-height: 2.05;
+  color: var(--ink-soft);
+  margin: 0 0 clamp(26px, 5vw, 40px);
+  padding-left: 14px;
+  border-left: 2px solid var(--cinnabar);
+  animation: rise .7s ease .1s both;
+}
+.lede strong { color: var(--ink); font-weight: 600; }
+
+.sec { margin-bottom: clamp(30px, 6vw, 54px); animation: rise .7s ease both; }
+.sec-tag {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: .3em;
+  text-transform: uppercase;
+  color: var(--paper-warm);
+  background: var(--ink-soft);
+  padding: 2px 9px 1px;
+  border-radius: 2px;
+  margin-bottom: 9px;
+}
+.sec-tag[data-k="how"] { background: var(--cinnabar); }
+.sec h2 {
+  font-family: var(--brush);
+  font-weight: 400;
+  font-size: clamp(23px, 5.2vw, 31px);
+  letter-spacing: .06em;
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+.sec p { margin: 0 0 13px; line-height: 2; color: var(--ink-soft); }
+.sec p:last-child { margin-bottom: 0; }
+.sec strong { color: var(--ink); font-weight: 600; }
+.sec code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .88em;
+  background: rgba(120, 96, 60, .13);
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+
+/* the three primitives */
+.prim { display: grid; gap: 10px; margin: 16px 0 4px; }
+.prim-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 4px 14px;
+  align-items: baseline;
+  padding: 11px 13px;
+  background: linear-gradient(170deg, rgba(255,252,243,.72), rgba(226,212,186,.34));
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+.prim-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--cinnabar);
+  letter-spacing: .02em;
+}
+.prim-what { font-size: 13.5px; line-height: 1.8; color: var(--ink-soft); }
+.prim-eg { grid-column: 2; font-size: 12px; color: var(--ink-faint); line-height: 1.75; }
+@media (max-width: 480px) {
+  .prim-row { grid-template-columns: 1fr; }
+  .prim-eg { grid-column: 1; }
+}
+
+/* what goes in / what comes back */
+.io { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0 4px; }
+@media (max-width: 620px) { .io { grid-template-columns: 1fr; } }
+.io-col {
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: rgba(255, 250, 238, .5);
+  overflow: hidden;
+}
+.io-head {
+  font-size: 11.5px;
+  letter-spacing: .12em;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--rule);
+  background: rgba(226, 212, 186, .42);
+  color: var(--ink-soft);
+}
+.io-head[data-d="out"] { color: var(--cinnabar); }
+.io-col pre {
+  margin: 0;
+  padding: 11px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+  white-space: pre;
+  overflow-x: auto;
+}
+.io-note {
+  margin: 0;
+  padding: 0 12px 10px;
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--ink-faint);
+}
+.io-note code { font-size: .9em; }
+
+/* who does what */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0 4px; }
+@media (max-width: 560px) { .split { grid-template-columns: 1fr; } }
+.split-col {
+  padding: 13px 15px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: rgba(255, 250, 238, .5);
+}
+.split-col[data-w="jev"] { border-color: rgba(163,46,36,.35); }
+.split-head { font-size: 13px; letter-spacing: .12em; margin-bottom: 8px; color: var(--ink); }
+.split-col[data-w="jev"] .split-head { color: var(--cinnabar); }
+.split-col ul { margin: 0; padding-left: 17px; }
+.split-col li { font-size: 13px; line-height: 1.95; color: var(--ink-soft); }
+
+/* ─── the How steps ──────────────────────────────────────── */
+
+.how-step {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 0 15px;
+  padding-bottom: 26px;
+  position: relative;
+}
+.how-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 16px; top: 36px; bottom: 6px;
+  width: 1px;
+  background: linear-gradient(var(--rule), rgba(34,26,16,.05));
+}
+.how-n {
+  width: 33px; height: 33px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font-family: var(--brush);
+  font-size: 17px;
+  color: var(--paper-warm);
+  background: radial-gradient(circle at 34% 28%, #3a3a38, #0a0c0b 74%);
+  box-shadow: 0 1px 3px rgba(35,20,6,.45);
+}
+.how-title { font-size: 15.5px; letter-spacing: .05em; margin: 4px 0 7px; color: var(--ink); }
+.how-body { font-size: 13.5px; line-height: 1.95; color: var(--ink-soft); margin: 0 0 12px; }
+.how-body code { font-size: .86em; }
+
+.how-anim {
+  padding: 15px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background:
+    radial-gradient(120% 100% at 20% 0%, rgba(255,252,243,.8), transparent 70%),
+    rgba(226, 212, 186, .26);
+  overflow: hidden;
+}
+.anim-cap {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  letter-spacing: .07em;
+  margin: 11px 0 0;
+}
+
+/* a compact board that reuses .demo-pt / .demo-stone from board.css */
+.mini {
+  display: grid;
+  grid-template-columns: repeat(var(--dn), 1fr);
+  width: 128px;
+  aspect-ratio: 1;
+  flex: none;
+  padding: 6px;
+  border-radius: 2px;
+  background: linear-gradient(158deg, var(--wood-hi), var(--wood-lo));
+  box-shadow: inset 0 0 0 1px var(--wood-edge), 0 2px 6px -3px rgba(60,38,16,.55);
+}
+
+/* Column letters / row numbers around a mini board. The gutters mirror the
+   board's own 6px padding so each label lands on its cell's centre. */
+.mini-axed {
+  flex: none;
+  display: grid;
+  grid-template-columns: 13px 128px;
+  grid-template-rows: 12px 128px;
+}
+.mini-axed .mini { grid-column: 2; grid-row: 2; }
+.mini-cols, .mini-rows {
+  display: grid;
+  font-size: 8.5px;
+  line-height: 1;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.mini-cols {
+  grid-column: 2; grid-row: 1;
+  grid-template-columns: repeat(var(--dn), 1fr);
+  padding: 0 6px;
+  align-items: end;
+}
+.mini-cols span { text-align: center; }
+.mini-rows {
+  grid-column: 1; grid-row: 2;
+  grid-template-rows: repeat(var(--dn), 1fr);
+  padding: 6px 0;
+  justify-items: end;
+}
+.mini-rows span { align-self: center; padding-right: 3px; }
+
+.row2 { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.arrow {
+  font-size: 19px;
+  color: var(--cinnabar);
+  animation: jev-nudge 2.6s ease-in-out infinite;
+}
+@keyframes jev-nudge {
+  0%, 100% { transform: translateX(0);   opacity: .5; }
+  50%      { transform: translateX(4px); opacity: 1; }
+}
+
+/* 1 — the state slip: lines written one after another, then the sheet resets */
+.slip {
+  flex: 1 1 210px;
+  min-width: 180px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.95;
+  color: var(--ink-soft);
+  background: rgba(255, 252, 243, .78);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 9px 11px;
+}
+.slip span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slip span b { color: var(--cinnabar); font-weight: 400; }
+.slip span { animation: jev-write 6s ease-in-out infinite both; }
+.slip span:nth-child(1) { animation-delay: .0s; }
+.slip span:nth-child(2) { animation-delay: .5s; }
+.slip span:nth-child(3) { animation-delay: 1.0s; }
+.slip span:nth-child(4) { animation-delay: 1.5s; }
+.slip span:nth-child(5) { animation-delay: 2.0s; }
+@keyframes jev-write {
+  0%        { opacity: 0; transform: translateY(5px); }
+  10%, 88%  { opacity: 1; transform: none; }
+  100%      { opacity: 0; transform: none; }
+}
+
+/* 2 — the 5-cell window sliding along a line */
+.strip {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  width: min(100%, 320px);
+  height: 36px;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: linear-gradient(158deg, var(--wood-hi), var(--wood-lo));
+  box-shadow: inset 0 0 0 1px var(--wood-edge);
+}
+.strip .demo-pt::after { display: none; }
+.win-box {
+  position: absolute;
+  top: 2px; bottom: 2px;
+  left: 4px;
+  width: calc((100% - 8px) / 9 * 5);
+  border: 1.5px solid var(--cinnabar);
+  border-radius: 2px;
+  background: rgba(201, 74, 54, .13);
+  animation: jev-slide 5.6s cubic-bezier(.6,0,.4,1) infinite;
+}
+@keyframes jev-slide {
+  0%,   6%  { transform: translateX(0); }
+  16%, 22%  { transform: translateX(calc((100% / 5) * 1)); }
+  /* the long dwell: this offset frames XX.XX, the four-stone shape */
+  34%, 72%  { transform: translateX(calc((100% / 5) * 2)); }
+  84%, 90%  { transform: translateX(calc((100% / 5) * 3)); }
+  100%      { transform: translateX(0); }
+}
+
+/* 3 — one request, questions fanning out in parallel */
+.fan { display: grid; gap: 7px; width: 100%; }
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  background: rgba(255, 252, 243, .8);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--celadon);
+  border-radius: 2px;
+  padding: 6px 10px;
+  animation: jev-fan 3.4s ease-out infinite both;
+}
+/* all three leave at the same instant — that is the point of the fan-out */
+.chip:nth-child(1) { animation-delay: .0s; }
+.chip:nth-child(2) { animation-delay: .04s; }
+.chip:nth-child(3) { animation-delay: .08s; }
+.chip em {
+  font-style: normal;
+  margin-left: auto;
+  font-family: var(--serif);
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: .06em;
+}
+@keyframes jev-fan {
+  0%       { opacity: 0; transform: translateX(-16px); }
+  18%, 74% { opacity: 1; transform: none; }
+  100%     { opacity: .18; transform: translateX(14px); }
+}
+
+/* 4 — the probability table coming back */
+.pbars { width: 100%; display: grid; gap: 6px; }
+.pbar { display: flex; align-items: center; gap: 9px; font-size: 11.5px; }
+.pbar code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  width: 34px;
+  color: var(--ink-soft);
+  background: none;
+  padding: 0;
+}
+.pbar i {
+  flex: 1;
+  display: block;
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(34, 26, 16, .12);
+  overflow: hidden;
+}
+.pbar i::before {
+  content: "";
+  display: block;
+  height: 100%;
+  width: var(--w);
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--ink-soft), var(--cinnabar));
+  transform-origin: left;
+  animation: jev-grow 4.2s cubic-bezier(.3,1,.4,1) infinite both;
+}
+.pbar:nth-child(1) i::before { animation-delay: .0s; }
+.pbar:nth-child(2) i::before { animation-delay: .12s; }
+.pbar:nth-child(3) i::before { animation-delay: .24s; }
+.pbar:nth-child(4) i::before { animation-delay: .36s; }
+.pbar em {
+  font-style: normal;
+  width: 42px;
+  text-align: right;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes jev-grow {
+  0%       { transform: scaleX(0); }
+  34%, 86% { transform: scaleX(1); }
+  100%     { transform: scaleX(0); }
+}
+
+/* 5 — 显影: the distribution washes onto the board, then the stone lands */
+.heat {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 150%; height: 150%;
+  margin: -75% 0 0 -75%;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(30, 22, 12, .5) 0%, rgba(30, 22, 12, .18) 45%, transparent 72%);
+  opacity: 0;
+  transform: scale(.5);
+  animation: jev-wash 5s ease-in-out infinite both;
+}
+@keyframes jev-wash {
+  0%       { opacity: 0; transform: scale(.5); }
+  22%, 62% { opacity: var(--o, .5); transform: scale(1); }
+  82%, 100%{ opacity: 0; transform: scale(1); }
+}
+.landing { animation: jev-land 5s ease-in-out infinite both; }
+@keyframes jev-land {
+  0%, 62%  { opacity: 0; transform: scale(1.6) translateY(-16%); }
+  72%      { opacity: 1; transform: scale(.94); }
+  80%, 94% { opacity: 1; transform: scale(1); }
+  100%     { opacity: 0; transform: scale(1); }
+}
+.gate {
+  display: inline-block;
+  font-size: 11.5px;
+  letter-spacing: .06em;
+  color: var(--celadon);
+  border: 1px solid rgba(110, 138, 120, .5);
+  border-radius: 2px;
+  padding: 3px 9px;
+  background: rgba(240, 246, 240, .6);
+}
+
+/* how much */
+.price {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 4px;
+}
+.price-cell {
+  flex: 1 1 150px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: rgba(255, 250, 238, .5);
+}
+.price-k { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-faint); }
+.price-v {
+  font-size: clamp(17px, 4vw, 21px);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  margin-top: 3px;
+}
+.price-v small { font-size: 12px; color: var(--ink-faint); margin-left: 3px; }
+
+.back-cta {
+  margin-top: clamp(26px, 5vw, 44px);
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.back-cta .note { font-size: 12px; color: var(--ink-faint); letter-spacing: .05em; }
+
+/* `.demo-pt`'s grid lines are ::before/::after, and ::after paints AFTER child
+   elements — so the vertical line draws on top of the stones and overlays
+   unless every layer is declared. Same trap as the real board (see CLAUDE.md).
+   Layers here: lines 0, heat wash 1, stone 2. */
+.mini .demo-pt::before,
+.mini .demo-pt::after,
+.strip .demo-pt::before { z-index: 0; }
+.mini .demo-stone,
+.strip .demo-stone { z-index: 2; }
+.heat  { z-index: 1; }
+.win-box { z-index: 3; }
+
+/* Reduced motion: globals.css collapses every animation to its 100% frame,
+   which for the looping demos here is the *reset* frame — blank slips, empty
+   bars, no stone. Park each one on its informative state instead. Higher
+   specificity than globals' `*` rule so this wins regardless of file order. */
+@media (prefers-reduced-motion: reduce) {
+  .how-anim .slip span,
+  .how-anim .chip,
+  .how-anim .arrow,
+  .how-anim .landing,
+  .how-anim .pbar i::before,
+  .how-anim .heat,
+  .how-anim .win-box {
+    animation: none !important;
+  }
+  .how-anim .slip span,
+  .how-anim .chip,
+  .how-anim .arrow,
+  .how-anim .landing { opacity: 1; transform: none; }
+  .how-anim .pbar i::before { transform: scaleX(1); }
+  .how-anim .heat { opacity: var(--o, .5); transform: scale(1); }
+  .how-anim .win-box { transform: translateX(calc((100% / 5) * 2)); }
+}

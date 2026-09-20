@@ -1,0 +1,30 @@
+{
+  "name": "wuziqi-jev",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "probe": "tsx --env-file-if-exists=.env.local scripts/probe.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx scripts/test-rules.ts && tsx scripts/test-lines.ts && tsx scripts/test-renju.ts && tsx scripts/test-exploit.ts && tsx scripts/test-opponent.ts",
+    "ladder": "tsx --env-file-if-exists=.env.local scripts/ladder.ts",
+    "trap": "tsx --env-file-if-exists=.env.local scripts/test-trap.ts",
+    "colour": "tsx --env-file-if-exists=.env.local scripts/colour-check.ts"
+  },
+  "dependencies": {
+    "ai": "7.0.107",
+    "next": "^15.5.4",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.1.1",
+    "@types/react-dom": "^19.1.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
