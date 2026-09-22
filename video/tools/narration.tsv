@@ -1,0 +1,7 @@
+0	7	Gomoku versus Jev. Teaching a judgment model to play five in a row.
+7	17	Jev doesn't write text. You give it a situation and typed questions, and it answers with calibrated probabilities.
+17	29	So the work is split. Code handles the rules and describes the position. Jev makes the judgment: which move, out of every empty point.
+29	41	Early on, Jev looked weak. Every time, the board description was wrong. Once threats were stated as facts, forced moves went from zero of twelve to twelve of twelve.
+41	55	Then, a loop. Play twenty games. Replay the losses. Fix one fact. Play again. No engine answers, only truer facts.
+55	67	Here, Jev plays black, and wins with a four-three.
+67	73	Long forcing sequences are still beyond it. Come and play Jev.
