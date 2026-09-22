@@ -1,0 +1,1057 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gomoku vs Jev</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=IM+Fell+English:ital@0;1&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%A3%8B&display=swap">
+<style>
+  html, body { margin: 0; height: 100%; background: #1f1b16; overflow: hidden; }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  /* object-fit: contain, for a canvas: the largest 16:9 box that fits the window. */
+  #c {
+    display: block;
+    width: min(100vw, calc(100vh * 16 / 9));
+    height: min(100vh, calc(100vw * 9 / 16));
+    background: #1f1b16;
+  }
+  #play {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    font: 400 clamp(20px, 2.4vw, 34px) "IM Fell English", "EB Garamond", Georgia, serif;
+    letter-spacing: 0.06em;
+    color: #efe6d2; background: rgba(31, 27, 22, 0.55);
+    border: 1px solid rgba(239, 230, 210, 0.55); border-radius: 2px;
+    padding: 0.45em 1.3em 0.5em; cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+  }
+  #play:hover, #play:focus-visible { background: rgba(179, 50, 42, 0.85); border-color: rgba(239, 230, 210, 0.8); outline: none; }
+  body.rec #play { display: none; }
+  body.rec { cursor: none; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c" width="1920" height="1080"></canvas></div>
+<button id="play" type="button" aria-label="Play">Play ▶</button>
+<script>
+(() => {
+'use strict';
+
+/* ───────────────────────── constants ───────────────────────── */
+
+const W = 1920, H = 1080, TOTAL = 73;
+const PAPER = '#efe6d2', INK = '#1f1b16', WOOD = '#d9b36c', CINNABAR = '#b3322a';
+const ink = a => `rgba(31,27,22,${a})`;
+const cin = a => `rgba(179,50,42,${a})`;
+const pap = a => `rgba(239,230,210,${a})`;
+const FELL = '"IM Fell English", "EB Garamond", Georgia, serif';
+const GARA = '"EB Garamond", Georgia, serif';
+const CJK  = '"Noto Serif SC", "Songti SC", serif';
+
+const RECORD = new URLSearchParams(location.search).get('record') === '1';
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const btn = document.getElementById('play');
+
+/* ───────────────────────── math ───────────────────────── */
+
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const eOC = u => 1 - Math.pow(1 - clamp(u), 3);                 // easeOutCubic
+const eIOS = u => -(Math.cos(Math.PI * clamp(u)) - 1) / 2;       // easeInOutSine
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const fu = (u, a, d = 0.6) => eOC(prog(u, a, a + d));            // fade-up progress
+const out = (u, a, d = 0.5) => 1 - eIOS(prog(u, a, a + d));      // fade-out multiplier
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function hash(n) { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+
+/* Board coordinates: columns A–O left to right, rows 1–15 top to bottom. */
+const pc = s => [s.charCodeAt(0) - 65, parseInt(s.slice(1), 10) - 1];
+const pname = (c, r) => String.fromCharCode(65 + c) + (r + 1);
+
+/* ───────────────────────── timeline ───────────────────────── */
+
+const SCENES = [
+  { name: 'Title',                                      start: 0,  draw: sTitle  },
+  { name: 'What Jev is',                                start: 7,  draw: sWhat   },
+  { name: 'Code does the rules; Jev does the judgment', start: 17, draw: sLayers },
+  { name: 'The lesson',                                 start: 29, draw: sLesson },
+  { name: 'The loop',                                   start: 41, draw: sLoop   },
+  { name: 'A game',                                     start: 55, draw: sGame   },
+  { name: 'End card',                                   start: 67, draw: sEnd    },
+];
+const WASH_AT = [7, 17, 29, 41, 55, 67];
+
+/* Scene 6. Black = Jev, white = opponent. A clean 四三: J7 makes a four on the
+   J file and an open three on row 7 at once; white must block the four at J6,
+   black makes the open four G7–J7, and whichever end white takes, row 7 wins.
+   Five: G7-H7-I7-J7-K7 on the 17th move, and no five before it. */
+const GAME = 'H8 I9 H7 H6 I7 G9 J8 I8 J9 I10 J10 J11 J7 J6 G7 F7 K7'.split(' ');
+const G_T0 = 55.5, G_DT = 0.52;
+const moveT = k => G_T0 + k * G_DT;
+const WIN_T = moveT(GAME.length - 1) + 0.12;
+const WIN_FROM = 'G7', WIN_TO = 'K7';
+
+/* Scene 4: X X · X X, landing one by one. */
+const LESSON = [{ i: 2, t: 29.5 }, { i: 3, t: 29.75 }, { i: 5, t: 30.0 }, { i: 6, t: 30.25 }];
+
+/* Sound events, computed from the same timeline as the pictures. */
+const NOTE = { D3: 146.83, E3: 164.81, G3: 196.0, A3: 220.0, C4: 261.63, D4: 293.66, E4: 329.63, G4: 392.0 };
+const MOTIFS = [
+  [0.9,  ['D3', 'A3', 'D4'], 0.26],
+  [7.0,  ['E3', 'G3', 'A3'], 0.22],
+  [17.0, ['D3', 'G3', 'C4'], 0.22],
+  [29.0, ['A3', 'G3', 'E3'], 0.24],
+  [41.0, ['D3', 'E3', 'G3', 'A3'], 0.2],
+  [55.0, ['G3', 'A3', 'D4'], 0.22],
+  [67.0, ['C4', 'A3', 'G3', 'D3'], 0.32],
+];
+const EVENTS = [];
+MOTIFS.forEach(([t0, ns, dt]) => ns.forEach((n, i) =>
+  EVENTS.push({ t: t0 + i * dt, k: 'pluck', f: NOTE[n], v: i === ns.length - 1 ? 0.95 : 0.75 })));
+LESSON.forEach(s => EVENTS.push({ t: s.t, k: 'click', v: 0.9, tone: 1.0 }));
+GAME.forEach((m, k) => EVENTS.push({ t: moveT(k), k: 'click', v: 1.0, tone: k % 2 ? 1.1 : 0.94 }));
+EVENTS.push({ t: WIN_T, k: 'shimmer' });
+EVENTS.sort((a, b) => a.t - b.t);
+
+/* ───────────────────────── textures (built once) ───────────────────────── */
+
+let PAPER_TEX = null, BOARD_S = null, BOARD_L = null, FRAG = null;
+
+function makePaper() {
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'); const R = mulberry32(20260923);
+  g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 70; i++) {               // soft mottling
+    const x = R() * W, y = R() * H, r = 90 + R() * 280, dark = R() < 0.5;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, dark ? 'rgba(150,120,80,0.035)' : 'rgba(255,250,238,0.06)');
+    gr.addColorStop(1, 'rgba(150,120,80,0)');
+    g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r);
+  }
+  g.lineCap = 'round';
+  for (let i = 0; i < 460; i++) {              // fibres
+    const x = R() * W, y = R() * H, len = 16 + R() * 120, ang = R() * Math.PI * 2, bend = (R() - 0.5) * len * 0.7;
+    const x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len;
+    const mx = (x + x2) / 2 + Math.cos(ang + Math.PI / 2) * bend, my = (y + y2) / 2 + Math.sin(ang + Math.PI / 2) * bend;
+    const dark = R() < 0.68;
+    g.strokeStyle = dark ? `rgba(110,88,58,${0.035 + R() * 0.06})` : `rgba(255,252,244,${0.10 + R() * 0.16})`;
+    g.lineWidth = 0.5 + R() * 1.1;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(mx, my, x2, y2); g.stroke();
+  }
+  for (let i = 0; i < 240; i++) {              // specks
+    g.fillStyle = `rgba(90,70,45,${0.04 + R() * 0.07})`;
+    g.beginPath(); g.arc(R() * W, R() * H, 0.6 + R() * 1.3, 0, Math.PI * 2); g.fill();
+  }
+  const v = g.createRadialGradient(W / 2, H / 2, H * 0.42, W / 2, H / 2, H * 1.08);
+  v.addColorStop(0, 'rgba(110,84,50,0)'); v.addColorStop(1, 'rgba(110,84,50,0.17)');
+  g.fillStyle = v; g.fillRect(0, 0, W, H);
+  return c;
+}
+
+/* Kaya: wide, soft bands of grain. Never thin stripes. */
+function makeWood(w, h, seed) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'); const R = mulberry32(seed);
+  g.fillStyle = WOOD; g.fillRect(0, 0, w, h);
+  const t = document.createElement('canvas'); t.width = w; t.height = h;
+  const q = t.getContext('2d');
+  let x = -w * 0.05;
+  while (x < w * 1.05) {
+    const bw = w * (0.06 + R() * 0.12), dark = R() < 0.55;
+    const a = dark ? 0.05 + R() * 0.07 : 0.05 + R() * 0.06;
+    q.fillStyle = dark ? `rgba(150,100,40,${a})` : `rgba(245,215,150,${a})`;
+    const amp = w * 0.014, ph = R() * 6, fr = 0.8 + R() * 1.4;
+    q.beginPath();
+    for (let y = 0; y <= h; y += h / 24) q.lineTo(x + Math.sin(y / h * Math.PI * fr + ph) * amp, y);
+    for (let y = h; y >= 0; y -= h / 24) q.lineTo(x + bw + Math.sin(y / h * Math.PI * fr + ph + 0.5) * amp, y);
+    q.closePath(); q.fill();
+    x += bw * (0.7 + R() * 0.6);
+  }
+  g.filter = `blur(${Math.max(6, Math.round(w * 0.014))}px)`;
+  g.drawImage(t, 0, 0); g.filter = 'none';
+  const lg = g.createLinearGradient(0, 0, w, h);
+  lg.addColorStop(0, 'rgba(255,240,205,0.20)'); lg.addColorStop(0.5, 'rgba(255,240,205,0)'); lg.addColorStop(1, 'rgba(110,70,25,0.16)');
+  g.fillStyle = lg; g.fillRect(0, 0, w, h);
+  return c;
+}
+
+/* A 15×15 board: exact grid, star points D4 D12 H8 L4 L12, optional A–O / 1–15 labels. */
+function makeBoard(size, labels, seed) {
+  const n = 15;
+  const cell = size / (n - 1 + (labels ? 2.0 : 1.3));
+  const m = (size - (n - 1) * cell) / 2;
+  const c = document.createElement('canvas'); c.width = size; c.height = size;
+  const g = c.getContext('2d');
+  g.drawImage(makeWood(size, size, seed), 0, 0);
+  g.strokeStyle = 'rgba(120,78,30,0.5)'; g.lineWidth = 2; g.strokeRect(1, 1, size - 2, size - 2);
+  g.strokeStyle = 'rgba(255,240,205,0.35)'; g.lineWidth = 1; g.strokeRect(3.5, 3.5, size - 7, size - 7);
+  g.strokeStyle = ink(0.8); g.lineWidth = Math.max(1.1, cell * 0.032);
+  for (let i = 0; i < n; i++) {
+    const p = m + i * cell;
+    g.beginPath(); g.moveTo(m, p); g.lineTo(m + (n - 1) * cell, p); g.stroke();
+    g.beginPath(); g.moveTo(p, m); g.lineTo(p, m + (n - 1) * cell); g.stroke();
+  }
+  g.lineWidth = Math.max(1.8, cell * 0.055);
+  g.strokeRect(m, m, (n - 1) * cell, (n - 1) * cell);
+  g.fillStyle = ink(0.9);
+  for (const s of ['D4', 'D12', 'H8', 'L4', 'L12']) {
+    const [cc, rr] = pc(s);
+    g.beginPath(); g.arc(m + cc * cell, m + rr * cell, Math.max(2.4, cell * 0.095), 0, Math.PI * 2); g.fill();
+  }
+  if (labels) {
+    g.fillStyle = ink(0.55); g.font = `${Math.round(cell * 0.33)}px ${GARA}`;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (let i = 0; i < n; i++) {
+      g.fillText(String.fromCharCode(65 + i), m + i * cell, m * 0.46);
+      g.fillText(String(i + 1), m * 0.46, m + i * cell);
+    }
+  }
+  return { img: c, size, cell, m, n };
+}
+
+/* Scene 4's fragment: 9×3 points of a board, lines running off the edges, edges dissolving into paper. */
+const FR = { x: 510, y: 130, w: 900, h: 360, cell: 100, pad: 80 };
+function makeFragment() {
+  const { w, h, cell, pad } = FR;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.drawImage(makeWood(w, h, 9127), 0, 0);
+  g.strokeStyle = ink(0.8); g.lineWidth = 3;
+  for (let r = 0; r < 3; r++) { const y = pad + r * cell; g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+  for (let i = 0; i < 9; i++) { const x = cell / 2 + i * cell; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+  g.globalCompositeOperation = 'destination-in';
+  const gx = g.createLinearGradient(0, 0, w, 0);
+  gx.addColorStop(0, 'rgba(0,0,0,0)'); gx.addColorStop(0.11, 'rgba(0,0,0,1)');
+  gx.addColorStop(0.89, 'rgba(0,0,0,1)'); gx.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gx; g.fillRect(0, 0, w, h);
+  const gy = g.createLinearGradient(0, 0, 0, h);
+  gy.addColorStop(0, 'rgba(0,0,0,0)'); gy.addColorStop(0.13, 'rgba(0,0,0,1)');
+  gy.addColorStop(0.87, 'rgba(0,0,0,1)'); gy.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gy; g.fillRect(0, 0, w, h);
+  return c;
+}
+
+/* ───────────────────────── drawing primitives ───────────────────────── */
+
+let SA = 1; // scene alpha, multiplied into everything a scene draws
+
+function txt(s, x, y, o = {}) {
+  const a = (o.a === undefined ? 1 : o.a);
+  if (a <= 0.001) return;
+  const rise = o.rise === undefined ? a : o.rise;
+  let size = o.size || 40;
+  ctx.save();
+  ctx.globalAlpha = SA * a;
+  const font = () => `${o.style || ''} ${o.weight || 400} ${size}px ${o.font || GARA}`;
+  ctx.font = font();
+  if (o.ls !== undefined && 'letterSpacing' in ctx) ctx.letterSpacing = o.ls + 'px';
+  if (o.maxW) { const w = ctx.measureText(s).width; if (w > o.maxW) { size *= o.maxW / w; ctx.font = font(); } }
+  ctx.fillStyle = o.color || INK;
+  ctx.textAlign = o.align || 'center';
+  ctx.textBaseline = o.base || 'middle';
+  ctx.fillText(s, x, y + 12 * (1 - rise));
+  ctx.restore();
+}
+
+function measure(s, font) { ctx.save(); ctx.font = font; const w = ctx.measureText(s).width; ctx.restore(); return w; }
+
+function wrap(s, font, maxW) {
+  const words = s.split(' '); const lines = []; let cur = '';
+  for (const wd of words) {
+    const tryS = cur ? cur + ' ' + wd : wd;
+    if (measure(tryS, font) > maxW && cur) { lines.push(cur); cur = wd; } else cur = tryS;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/* A brush stroke along a path fn(s) → [x, y], s ∈ [0,1], revealed up to p, width wfn(s). */
+function brush(fn, p, wfn, color, alpha, N = 140) {
+  if (p <= 0 || alpha <= 0) return;
+  const n = Math.max(10, Math.ceil(N * p));
+  const L = [], Rr = [];
+  for (let i = 0; i <= n; i++) {
+    const s = p * i / n;
+    const [x, y] = fn(s);
+    const [xa, ya] = fn(Math.max(0, s - 0.002)), [xb, yb] = fn(Math.min(1, s + 0.002));
+    const dx = xb - xa, dy = yb - ya, d = Math.hypot(dx, dy) || 1;
+    const nx = -dy / d, ny = dx / d, w = wfn(s) / 2;
+    L.push([x + nx * w, y + ny * w]); Rr.push([x - nx * w, y - ny * w]);
+  }
+  ctx.save();
+  ctx.globalAlpha = SA * alpha; ctx.fillStyle = color;
+  ctx.beginPath(); ctx.moveTo(L[0][0], L[0][1]);
+  for (const q of L) ctx.lineTo(q[0], q[1]);
+  for (let i = Rr.length - 1; i >= 0; i--) ctx.lineTo(Rr[i][0], Rr[i][1]);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+const taper = (s, a = 0.08, b = 0.12, floor = 0.35) =>
+  floor + (1 - floor) * Math.min(1, Math.sqrt(s / a), Math.sqrt(Math.max(0, 1 - s) / b));
+const lineFn = (x1, y1, x2, y2, wob = 0, ph = 0) => s => {
+  const dx = x2 - x1, dy = y2 - y1, d = Math.hypot(dx, dy) || 1;
+  const o = wob * Math.sin(s * Math.PI * 2 + ph);
+  return [x1 + dx * s - dy / d * o, y1 + dy * s + dx / d * o];
+};
+function brushLine(x1, y1, x2, y2, width, color, alpha, p = 1, wob = 0) {
+  brush(lineFn(x1, y1, x2, y2, wob, x1 * 0.01), p, s => width * taper(s) * (1 + 0.07 * Math.sin(s * 23 + x1)), color, alpha, 60);
+}
+
+function roughBox(x, y, w, h, alpha) {
+  if (alpha <= 0) return;
+  ctx.save(); ctx.globalAlpha = SA * alpha * 0.55; ctx.fillStyle = 'rgba(255,251,240,0.7)';
+  ctx.fillRect(x, y, w, h); ctx.restore();
+  const k = 7, lw = 3.4;
+  brushLine(x - k, y, x + w + k * 0.6, y + 1.5, lw, INK, 0.9 * alpha, 1, 0.8);
+  brushLine(x + w, y - k * 0.6, x + w - 1, y + h + k, lw, INK, 0.9 * alpha, 1, 0.6);
+  brushLine(x + w + k * 0.5, y + h, x - k * 0.8, y + h - 1, lw, INK, 0.9 * alpha, 1, 0.8);
+  brushLine(x, y + h + k * 0.5, x + 1.5, y - k, lw, INK, 0.9 * alpha, 1, 0.6);
+}
+
+function arrow(x1, y, x2, p, alpha) {
+  if (p <= 0) return;
+  brushLine(x1, y, lerp(x1, x2, p), y, 4.2, INK, 0.85 * alpha, 1, 1.2);
+  const ha = prog(p, 0.85, 1);
+  if (ha > 0) {
+    brushLine(x2 - 20, y - 12, x2 + 1, y, 3.6, INK, 0.85 * alpha * ha);
+    brushLine(x2 - 20, y + 12, x2 + 1, y, 3.6, INK, 0.85 * alpha * ha);
+  }
+}
+
+function stone(x, y, r, black, a = 1, scale = 1) {
+  if (a <= 0) return;
+  const rr = r * scale;
+  ctx.save(); ctx.globalAlpha = SA * a;
+  const sx = x + rr * 0.1, sy = y + rr * 0.18;
+  const sg = ctx.createRadialGradient(sx, sy, rr * 0.55, sx, sy, rr * 1.18);
+  sg.addColorStop(0, 'rgba(50,30,10,0.34)'); sg.addColorStop(1, 'rgba(50,30,10,0)');
+  ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(sx, sy, rr * 1.18, 0, Math.PI * 2); ctx.fill();
+  const g = ctx.createRadialGradient(x - rr * 0.38, y - rr * 0.42, rr * 0.05, x, y, rr);
+  if (black) { g.addColorStop(0, '#5a5148'); g.addColorStop(0.36, '#2a251f'); g.addColorStop(1, '#110f0c'); }
+  else { g.addColorStop(0, '#fffdf7'); g.addColorStop(0.55, '#f1eadb'); g.addColorStop(1, '#c9bfa9'); }
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.fill();
+  if (!black) { ctx.strokeStyle = 'rgba(120,100,70,0.35)'; ctx.lineWidth = 1; ctx.stroke(); }
+  ctx.restore();
+}
+
+/* A stone landing at tLand: scale 1.15 → 1.0 (easeOutCubic) over a soft ink bloom. */
+function landed(x, y, r, black, tLand, t, a = 1) {
+  if (t < tLand) return;
+  const u = t - tLand;
+  if (u < 0.85) {
+    const v = u / 0.85, br = r * (1.05 + 1.3 * eOC(v)), al = 0.36 * (1 - v) * (1 - v);
+    ctx.save(); ctx.globalAlpha = SA * a;
+    const g = ctx.createRadialGradient(x, y, r * 0.5, x, y, br);
+    g.addColorStop(0, ink(al)); g.addColorStop(0.7, ink(al * 0.55)); g.addColorStop(1, ink(0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, br, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  stone(x, y, r, black, a * Math.min(1, 0.35 + u / 0.05), 1.15 - 0.15 * eOC(u / 0.18));
+}
+
+function drawBoard(B, cx, cy, a) {
+  const x0 = cx - B.size / 2, y0 = cy - B.size / 2;
+  if (a > 0) {
+    ctx.save(); ctx.globalAlpha = SA * a;
+    ctx.shadowColor = 'rgba(60,38,16,0.38)'; ctx.shadowBlur = 34; ctx.shadowOffsetY = 14;
+    ctx.fillStyle = WOOD; ctx.fillRect(x0, y0, B.size, B.size);
+    ctx.shadowColor = 'transparent';
+    ctx.drawImage(B.img, x0, y0);
+    ctx.restore();
+  }
+  return { px: c => x0 + B.m + c * B.cell, py: r => y0 + B.m + r * B.cell, cell: B.cell };
+}
+
+function heatBlob(x, y, cell, v, a) {
+  const al = clamp(v) * a; if (al <= 0.002) return;
+  const r = cell * 0.62;
+  ctx.save(); ctx.globalAlpha = SA;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, ink(0.66 * al)); g.addColorStop(0.55, ink(0.34 * al)); g.addColorStop(1, ink(0));
+  ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+  ctx.restore();
+}
+
+function ring(x, y, r, lw, color, a) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = SA * a; ctx.strokeStyle = color; ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+}
+function dot(x, y, r, color, a) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = SA * a; ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
+
+/* The cinnabar seal: 棋, white on red, a little worn. */
+function seal(cx, cy, size, a, sc) {
+  if (a <= 0) return;
+  const R = mulberry32(771);
+  ctx.save(); ctx.globalAlpha = SA * a;
+  ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.rotate(-0.035);
+  const h = size / 2;
+  ctx.fillStyle = CINNABAR; ctx.beginPath();
+  const edge = (x1, y1, x2, y2) => { for (let i = 0; i <= 8; i++) { const u = i / 8; ctx.lineTo(lerp(x1, x2, u) + (R() - 0.5) * 2.2, lerp(y1, y2, u) + (R() - 0.5) * 2.2); } };
+  ctx.moveTo(-h, -h); edge(-h, -h, h, -h); edge(h, -h, h, h); edge(h, h, -h, h); edge(-h, h, -h, -h);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAPER; ctx.font = `700 ${Math.round(size * 0.68)}px ${CJK}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('棋', 0, size * 0.03);
+  for (let i = 0; i < 46; i++) {           // wear: where the paste did not take
+    ctx.fillStyle = pap(0.15 + R() * 0.35);
+    ctx.beginPath(); ctx.arc((R() - 0.5) * size * 0.98, (R() - 0.5) * size * 0.98, 0.6 + R() * 1.8, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+function stampSeal(u, at, cx = 1768, cy = 938, size = 92) {
+  seal(cx, cy, size, eOC(prog(u, at, at + 0.2)), 1.12 - 0.12 * eOC(prog(u, at, at + 0.35)));
+}
+
+/* Ink-wash transitions: radial blotches that bloom and fade across each cut. */
+function inkWash(t) {
+  for (const T of WASH_AT) {
+    const u = (t - (T - 0.95)) / 1.9;
+    if (u <= 0 || u >= 1) continue;
+    const R = mulberry32(T * 977 + 13);
+    for (let i = 0; i < 6; i++) {
+      const x = W * (0.1 + R() * 0.8), y = H * (0.14 + R() * 0.72);
+      const rmax = 220 + R() * 380, delay = R() * 0.3, peak = 0.13 + R() * 0.11;
+      const v = clamp((u - delay) / (1 - delay));
+      const lobes = [0, 1, 2, 3].map(() => [R() * Math.PI * 2, 0.25 + R() * 0.35, 0.45 + R() * 0.35]);
+      if (v <= 0) continue;
+      const grow = eOC(v), al = peak * Math.sin(Math.PI * v);
+      // a blotch is a core plus lobes that drift outward as the ink spreads into the fibres
+      const blobs = [[x, y, rmax * (0.2 + 0.8 * grow), 1]].concat(lobes.map(([ang, d, sz]) =>
+        [x + Math.cos(ang) * rmax * d * grow, y + Math.sin(ang) * rmax * d * grow, rmax * sz * (0.2 + 0.8 * grow), 0.7]));
+      for (const [bx, by, rad, k] of blobs) {
+        const g = ctx.createRadialGradient(bx, by, 0, bx, by, rad);
+        g.addColorStop(0, ink(al * k * 0.9)); g.addColorStop(0.55, ink(al * k * 0.75));
+        g.addColorStop(0.8, ink(al * k * 0.32)); g.addColorStop(1, ink(0));
+        ctx.save(); ctx.globalAlpha = 1; ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(bx, by, rad, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      }
+    }
+  }
+}
+
+/* ───────────────────────── scene 1 · title ───────────────────────── */
+
+function enso(cx, cy, R0, p) {
+  const th0 = -Math.PI * 0.36, sweep = Math.PI * 2 * 0.92;
+  const fn = s => { const th = th0 + s * sweep, r = R0 * (1 + 0.013 * Math.sin(s * 9 + 0.6)); return [cx + Math.cos(th) * r, cy + Math.sin(th) * r]; };
+  const wfn = s => (6 + 40 * Math.pow(1 - s, 0.85)) * (s < 0.03 ? 0.55 + 0.45 * s / 0.03 : 1) * (1 + 0.06 * Math.sin(s * 57));
+  brush(fn, p, s => wfn(s) * 1.35, INK, 0.10, 260);   // bleed into the paper
+  brush(fn, p, wfn, INK, 0.9, 260);
+  const R = mulberry32(4242);                          // dry-brush streaks toward the tail
+  for (let j = 0; j < 7; j++) {
+    const o = (j / 6 - 0.5) * 0.8, s0 = 0.42 + R() * 0.2, s1 = Math.min(p, 0.9 + R() * 0.08);
+    if (s1 <= s0) continue;
+    ctx.save(); ctx.globalAlpha = SA * 0.35; ctx.strokeStyle = PAPER; ctx.lineWidth = 1.2 + R() * 1.4;
+    ctx.beginPath();
+    for (let i = 0; i <= 50; i++) {
+      const s = s0 + (s1 - s0) * i / 50, [x, y] = fn(s), th = th0 + s * sweep, w = wfn(s) / 2;
+      const X = x + Math.cos(th) * o * w, Y = y + Math.sin(th) * o * w;
+      i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+    }
+    ctx.stroke(); ctx.restore();
+  }
+}
+
+function sTitle(u) {
+  enso(960, 430, 336, eIOS(prog(u, 0.9, 2.8)));
+  const f = fu(u, 2.0, 0.8);
+  if (f > 0) {
+    const parts = [
+      { s: 'Gomoku', font: `400 94px ${FELL}` },
+      { s: ' vs ', font: `italic 400 64px ${FELL}` },
+      { s: 'Jev', font: `400 94px ${FELL}` },
+    ];
+    const ws = parts.map(p => measure(p.s, p.font)), tw = ws.reduce((a, b) => a + b, 0);
+    let x = 960 - tw / 2;
+    ctx.save(); ctx.globalAlpha = SA * f; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    parts.forEach((p, i) => { ctx.font = p.font; ctx.fillText(p.s, x, 458 + 12 * (1 - f)); x += ws[i]; });
+    ctx.restore();
+  }
+  txt('Teaching a judgment model to play five-in-a-row', 960, 872, { size: 48, style: 'italic', a: fu(u, 2.7, 0.7), color: ink(0.86) });
+  stampSeal(u, 3.8);
+}
+
+/* ───────────────────────── scene 2 · what Jev is ───────────────────────── */
+
+const BOXES = [
+  { x: 280,  w: 300, label: 'state',     sub: 'the board, described' },
+  { x: 730,  w: 300, label: 'questions', sub: 'which move? who leads?' },
+  { x: 1180, w: 460, label: 'answers',   sub: 'with probabilities', bars: true },
+];
+const BY = 172, BH = 150;
+const S2_B = ['H8', 'I7', 'F7'], S2_W = ['G9', 'H9', 'I9'];
+const S2_HEAT = { J9: 0.41, F9: 0.33, E9: 0.04, K9: 0.04, J6: 0.03, G8: 0.02, I8: 0.02, H7: 0.012, G7: 0.01,
+  J10: 0.015, F10: 0.012, G10: 0.012, H10: 0.012, I10: 0.012, J8: 0.01, G6: 0.01, E8: 0.008, K10: 0.008 };
+const S2_MAX = 0.41, S2_TOP = 'J9';
+
+function sWhat(u, t) {
+  BOXES.forEach((b, i) => {
+    const f = fu(u, 0.5 + 0.55 * i, 0.7);
+    if (f <= 0) return;
+    const dx = -30 * (1 - f);
+    roughBox(b.x + dx, BY, b.w, BH, f);
+    const tx = b.bars ? b.x + dx + 170 : b.x + dx + b.w / 2;
+    txt(b.label, tx, BY + 62, { font: FELL, size: 56, a: f, rise: 1 });
+    txt(b.sub, tx, BY + 112, { size: 28, style: 'italic', a: f, rise: 1, color: ink(0.66) });
+    if (b.bars) {
+      const vals = [0.62, 0.25, 0.13], bx = b.x + dx + 330;
+      vals.forEach((v, j) => {
+        const g = eOC(prog(u, 1.9 + j * 0.12, 2.7 + j * 0.12));
+        ctx.save(); ctx.globalAlpha = SA * f;
+        ctx.fillStyle = ink(0.12); ctx.fillRect(bx, BY + 44 + j * 26, 100, 13);
+        ctx.fillStyle = j === 0 ? ink(0.85) : ink(0.45); ctx.fillRect(bx, BY + 44 + j * 26, 100 * v / 0.62 * g, 13);
+        ctx.restore();
+      });
+    }
+  });
+  arrow(594, BY + BH / 2, 716, eIOS(prog(u, 1.9, 2.4)), 1);
+  arrow(1044, BY + BH / 2, 1166, eIOS(prog(u, 2.4, 2.9)), 1);
+
+  const fc = fu(u, 3.0, 0.7);
+  txt('Jev doesn’t write text. It reads a situation and answers typed questions —', 960, 420, { size: 40, a: fc });
+  txt('with calibrated probabilities.', 960, 474, { size: 40, style: 'italic', a: fu(u, 3.3, 0.7) });
+
+  const fb = fu(u, 4.4, 0.8);
+  if (fb > 0) {
+    const G = drawBoard(BOARD_S, 960, 792, fb);
+    const r = G.cell * 0.45;
+    S2_B.forEach(s => { const [c, rr] = pc(s); stone(G.px(c), G.py(rr), r, true, fb); });
+    S2_W.forEach(s => { const [c, rr] = pc(s); stone(G.px(c), G.py(rr), r, false, fb); });
+    for (const [pt, p] of Object.entries(S2_HEAT)) {
+      const [c, rr] = pc(pt), h = hash(c * 17 + rr * 3);
+      const bloom = eOC(prog(u, 5.2 + h * 0.6, 6.0 + h * 0.6));
+      heatBlob(G.px(c), G.py(rr), G.cell, Math.sqrt(p / S2_MAX), 1.3 * bloom * fb);
+    }
+    const [tc, tr] = pc(S2_TOP), pulse = 0.5 + 0.5 * Math.sin((u - 6.0) * Math.PI * 2 / 1.3);
+    const ta = eOC(prog(u, 5.8, 6.3)) * fb;
+    ring(G.px(tc), G.py(tr), G.cell * (0.40 + 0.07 * pulse), 2.6, CINNABAR, ta * (0.55 + 0.45 * pulse));
+    dot(G.px(tc), G.py(tr), G.cell * 0.11, CINNABAR, ta * 0.9);
+
+    const fq = fu(u, 5.0, 0.6) * fb;
+    txt('which move?', 700, 792, { size: 38, style: 'italic', align: 'right', a: fq, color: ink(0.8) });
+    const fl = fu(u, 6.0, 0.6) * fb;
+    const rows = [['J9', '41%', true], ['F9', '33%', false], ['elsewhere', '26%', false]];
+    rows.forEach(([k, v, top], j) => {
+      txt(k, 1222, 740 + j * 48, { size: 32, align: 'left', a: fl, color: top ? CINNABAR : ink(0.8) });
+      txt(v, 1420, 740 + j * 48, { size: 32, align: 'right', a: fl, color: top ? CINNABAR : ink(0.8) });
+    });
+  }
+}
+
+/* ───────────────────────── scene 3 · layers ───────────────────────── */
+
+const LAYERS = [ // drawn bottom-up: rules are the foundation
+  { y: 590, title: 'Rules',    who: 'code', sub: 'five-in-a-row, legal moves',                at: 0.6 },
+  { y: 440, title: 'Facts',    who: 'code', sub: 'lines, threats, what each point would make', at: 1.7 },
+  { y: 290, title: 'Judgment', who: 'Jev',  sub: 'which move',                                  at: 2.8 },
+];
+function sLayers(u) {
+  const X = 340, LW = 1240, LH = 124;
+  LAYERS.forEach(L => {
+    const f = fu(u, L.at, 0.8);
+    if (f <= 0) return;
+    const x = X - 80 * (1 - f), y = L.y - LH / 2, jev = L.who === 'Jev';
+    ctx.save(); ctx.globalAlpha = SA * f;
+    ctx.fillStyle = jev ? 'rgba(255,251,240,0.62)' : ink(0.055);
+    ctx.fillRect(x, y, LW, LH);
+    ctx.restore();
+    brushLine(x - 5, y, x + LW + 4, y + 1, 3.2, INK, 0.85 * f, 1, 0.7);
+    brushLine(x + LW + 4, y + LH, x - 5, y + LH - 1, 3.2, INK, 0.85 * f, 1, 0.7);
+    if (jev) { ctx.save(); ctx.globalAlpha = SA * f; ctx.fillStyle = CINNABAR; ctx.fillRect(x, y + 10, 8, LH - 20); ctx.restore(); }
+    txt(L.title, x + 56, L.y - 16, { font: FELL, size: 58, align: 'left', a: f, rise: 1 });
+    txt(L.sub, x + 58, L.y + 34, { size: 30, style: 'italic', align: 'left', a: f, rise: 1, color: ink(0.68) });
+    txt('— ' + L.who, x + LW - 56, L.y, { font: FELL, size: 52, style: 'italic', align: 'right', a: f, rise: 1, color: jev ? CINNABAR : ink(0.8) });
+  });
+  txt('Every point on the board is an option.', 960, 810, { size: 48, a: fu(u, 4.0, 0.7) });
+  txt('Code describes the position. Jev chooses.', 960, 878, { size: 48, style: 'italic', a: fu(u, 4.5, 0.7) });
+}
+
+/* ───────────────────────── scene 4 · the lesson ───────────────────────── */
+
+function sLesson(u, t) {
+  const fp = fu(u, 0.1, 0.7);
+  if (fp > 0) { ctx.save(); ctx.globalAlpha = SA * fp; ctx.drawImage(FRAG, FR.x, FR.y); ctx.restore(); }
+  const px = i => FR.x + FR.cell / 2 + i * FR.cell, py = r => FR.y + FR.pad + r * FR.cell;
+  const r = FR.cell * 0.44;
+  stone(px(3), py(0), r, false, fp);
+  stone(px(6), py(2), r, false, fp);
+  LESSON.forEach(s => landed(px(s.i), py(1), r, true, s.t, t));
+
+  // phase A — what the first encoding saw
+  const fa = fu(u, 1.0, 0.5) * out(u, 4.1, 0.4);
+  if (fa > 0) {
+    for (const [a, b] of [[2, 3], [5, 6]]) {
+      const x1 = px(a) - 32, x2 = px(b) + 32, y = FR.y + FR.h + 26;
+      ctx.save(); ctx.globalAlpha = SA * fa; ctx.strokeStyle = ink(0.6); ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.moveTo(x1, y - 12); ctx.lineTo(x1, y); ctx.lineTo(x2, y); ctx.lineTo(x2, y - 12); ctx.stroke(); ctx.restore();
+      txt('open two', (x1 + x2) / 2, y + 34, { size: 30, style: 'italic', a: fa, color: ink(0.66) });
+    }
+  }
+  txt('What the first encoding saw: two open twos.', 960, 636, { size: 46, a: fu(u, 0.6, 0.6) * out(u, 4.1, 0.4) });
+
+  // phase B — what was really there
+  const ps = eIOS(prog(u, 4.5, 5.2));
+  brush(lineFn(px(1.6), py(1), px(6.4), py(1), 2.5, 0.4), ps, s => 16 * taper(s, 0.06, 0.1, 0.4) * (1 + 0.08 * Math.sin(s * 19)), CINNABAR, 0.86, 90);
+  const fg = eOC(prog(u, 4.9, 5.3));
+  if (fg > 0) {
+    dot(px(4), py(1), r * 0.92, cin(0.13), fg);
+    ring(px(4), py(1), r * 0.92, 3, CINNABAR, fg * 0.85);
+  }
+  txt('What was really there: a four that wins next move.', 960, 636, { size: 46, a: fu(u, 4.7, 0.6) });
+
+  // the lesson
+  txt('Every time Jev looked weak, the description of the board was wrong.', 960, 806,
+    { font: FELL, size: 60, a: fu(u, 6.8, 0.8), maxW: 1760 });
+  txt('Forced-move accuracy: 0/12 → 12/12 once threats were stated as facts.', 960, 892,
+    { size: 34, style: 'italic', a: fu(u, 7.6, 0.7), color: ink(0.7) });
+}
+
+/* ───────────────────────── scene 5 · the loop ───────────────────────── */
+
+const LOOP = { cx: 600, cy: 522, r: 228 };
+const STATIONS = [
+  { th: -90, label: 'play 20 games',     lx: 0,    ly: -60, align: 'center' },
+  { th: 0,   label: 'replay the losses', lx: 36,   ly: 0,   align: 'left' },
+  { th: 90,  label: 'fix one fact',      lx: 0,    ly: 62,  align: 'center' },
+  { th: 180, label: 'play 20 again',     lx: -36,  ly: 0,   align: 'right' },
+];
+const BARS = [
+  { label: ['chose the right block of an open three'], a: 0.60, b: 0.95, av: '~60%', bv: '~95%', y: 318, at: 3.0 },
+  { label: ['took the opponent’s key point', 'when it was stated'], a: 0.15, b: 0.56, av: '15%', bv: '56%', y: 548, at: 5.0 },
+];
+function sLoop(u) {
+  const { cx, cy, r } = LOOP;
+  const pr = eIOS(prog(u, 0.5, 2.4));
+  const fn = s => { const th = -Math.PI / 2 + s * Math.PI * 2 * 0.975; return [cx + Math.cos(th) * r, cy + Math.sin(th) * r]; };
+  brush(fn, pr, s => 13 * (0.7 + 0.3 * Math.sin(s * Math.PI * 3 + 0.4)) * taper(s, 0.03, 0.05, 0.45), INK, 0.1, 220);
+  brush(fn, pr, s => 9.5 * (0.7 + 0.3 * Math.sin(s * Math.PI * 3 + 0.4)) * taper(s, 0.03, 0.05, 0.45), INK, 0.86, 220);
+  // clockwise chevrons between stations
+  [45, 135, 225, 315].forEach((deg, i) => {
+    const a = eOC(prog(u, 0.5 + 1.9 * (deg + 90) / 360, 0.8 + 1.9 * (deg + 90) / 360));
+    if (a <= 0) return;
+    const th = deg * Math.PI / 180, x = cx + Math.cos(th) * r, y = cy + Math.sin(th) * r;
+    const tx = -Math.sin(th), ty = Math.cos(th), nx = Math.cos(th), ny = Math.sin(th), L = 17;
+    brushLine(x - tx * L + nx * L * 0.8, y - ty * L + ny * L * 0.8, x + tx * 4, y + ty * 4, 3.4, INK, 0.8 * a);
+    brushLine(x - tx * L - nx * L * 0.8, y - ty * L - ny * L * 0.8, x + tx * 4, y + ty * 4, 3.4, INK, 0.8 * a);
+  });
+  STATIONS.forEach((S, i) => {
+    const at = 0.5 + 1.9 * (S.th + 90) / 360;
+    const f = fu(u, at, 0.5);
+    const th = S.th * Math.PI / 180, x = cx + Math.cos(th) * r, y = cy + Math.sin(th) * r;
+    dot(x, y, 17, INK, f); dot(x, y, 8, PAPER, f);
+    txt(S.label, x + S.lx, y + S.ly, { size: 38, align: S.align, a: fu(u, at + 0.15, 0.6) });
+  });
+  // a traveller going round, once drawn
+  const tv = eOC(prog(u, 2.6, 3.2));
+  if (tv > 0) {
+    const th = -Math.PI / 2 + ((u - 2.6) / 4.5) * Math.PI * 2;
+    dot(cx + Math.cos(th) * r, cy + Math.sin(th) * r, 9, CINNABAR, tv * 0.9);
+  }
+  txt('the loop', cx, cy, { font: FELL, size: 46, style: 'italic', a: fu(u, 2.3, 0.6), color: ink(0.55) });
+
+  // bars
+  const PX = 1210, TX = PX + 118, TW = 360;
+  BARS.forEach(B => {
+    const lf = fu(u, B.at, 0.6);
+    const lines = B.label;
+    lines.forEach((ln, j) => txt(ln, PX, B.y + j * 42, { size: 34, align: 'left', a: lf }));
+    const y0 = B.y + lines.length * 42 + 26;
+    [['before', B.a, B.av, 0.4, B.at + 0.4], ['after', B.b, B.bv, 0.86, B.at + 0.95]].forEach(([nm, v, vs, al, at], j) => {
+      const y = y0 + j * 48, g = eOC(prog(u, at, at + 1.1));
+      txt(nm, PX, y, { size: 28, style: 'italic', align: 'left', a: lf, rise: 1, color: ink(0.62) });
+      ctx.save(); ctx.globalAlpha = SA * lf;
+      ctx.fillStyle = ink(0.09); ctx.fillRect(TX, y - 9, TW, 18);
+      ctx.fillStyle = ink(al); ctx.fillRect(TX, y - 9, TW * v * g, 18);
+      ctx.restore();
+      txt(vs, TX + TW + 22, y, { size: 32, align: 'left', a: lf * eOC(prog(u, at + 0.5, at + 1.0)), color: j ? INK : ink(0.62) });
+    });
+  });
+  txt('No engine answers. Only truer facts.', 960, 964, { font: FELL, size: 54, style: 'italic', a: fu(u, 8.0, 0.7) });
+}
+
+/* ───────────────────────── scene 6 · a game ───────────────────────── */
+
+/* The faint heatmap under each black move: candidates are empty points near the stones. */
+const HEATS = [];
+(function buildHeats() {
+  for (let k = 0; k < GAME.length; k += 2) {
+    const occ = new Set(GAME.slice(0, k));
+    const stones = GAME.slice(0, k).map(pc);
+    const target = GAME[k], cand = [];
+    for (let c = 0; c < 15; c++) for (let r = 0; r < 15; r++) {
+      const nm = pname(c, r);
+      if (occ.has(nm) || nm === target) continue;
+      const near = stones.length ? stones.some(([sc, sr]) => Math.max(Math.abs(sc - c), Math.abs(sr - r)) <= 2)
+                                 : Math.max(Math.abs(7 - c), Math.abs(7 - r)) <= 2;
+      if (near) cand.push({ c, r, v: 0.08 + 0.4 * hash(k * 31 + c * 17 + r * 7), h: hash(c * 5 + r * 11 + k) });
+    }
+    cand.sort((a, b) => b.v - a.v);
+    const [tc, tr] = pc(target);
+    HEATS.push({ k, t: moveT(k), pts: cand.slice(0, 11), tc, tr });
+  }
+})();
+
+function sGame(u, t) {
+  const fb = fu(u, 0.0, 0.6);
+  const G = drawBoard(BOARD_L, 960, 540, fb);
+  const r = G.cell * 0.46;
+
+  for (const Hh of HEATS) {
+    const env = (t < Hh.t - 0.48 || t > Hh.t + 0.14) ? 0
+      : Math.min(eIOS(prog(t, Hh.t - 0.48, Hh.t - 0.3)), 1 - eIOS(prog(t, Hh.t - 0.02, Hh.t + 0.14)));
+    if (env <= 0) continue;
+    for (const p of Hh.pts) heatBlob(G.px(p.c), G.py(p.r), G.cell, p.v * (0.55 + 0.45 * Math.sin(t * 19 + p.h * 12)), env * 0.55);
+    heatBlob(G.px(Hh.tc), G.py(Hh.tr), G.cell, 0.6 + 0.4 * prog(t, Hh.t - 0.48, Hh.t), env * 0.6);
+  }
+
+  let last = -1;
+  GAME.forEach((m, k) => {
+    const [c, rr] = pc(m);
+    landed(G.px(c), G.py(rr), r, k % 2 === 0, moveT(k), t, fb);
+    if (t >= moveT(k)) last = k;
+  });
+  if (last >= 0 && t < WIN_T) {
+    const [c, rr] = pc(GAME[last]);
+    dot(G.px(c), G.py(rr), G.cell * 0.085, CINNABAR, 0.9 * eOC(prog(t, moveT(last) + 0.12, moveT(last) + 0.25)));
+  }
+
+  // the five, in cinnabar
+  const pw = eIOS(prog(t, WIN_T, WIN_T + 0.6));
+  if (pw > 0) {
+    const [c1, r1] = pc(WIN_FROM), [c2, r2] = pc(WIN_TO);
+    const ex = 0.42;
+    const x1 = G.px(c1 - ex), x2 = G.px(c2 + ex), y1 = G.py(r1), y2 = G.py(r2);
+    brush(lineFn(x1, y1, x2, y2, 1.5, 0.3), pw, s => 13 * taper(s, 0.05, 0.08, 0.4) * (1 + 0.07 * Math.sin(s * 21)), CINNABAR, 0.9, 90);
+  }
+
+  // who is who, and the moves so far
+  const fs = fu(u, 0.3, 0.6);
+  const side = (x, name, black, from) => {
+    txt(name, x, 230, { font: FELL, size: 62, a: fs });
+    stone(x - 54, 300, 15, black, fs);
+    txt(black ? 'black' : 'white', x + 14, 300, { size: 34, style: 'italic', a: fs, color: ink(0.7) });
+    for (let k = from, row = 0; k < GAME.length; k += 2, row++) {
+      const a = fu(t, moveT(k), 0.3);
+      if (a <= 0) continue;
+      const win = k === GAME.length - 1 && t >= WIN_T;
+      const col = win ? CINNABAR : (k === last ? INK : ink(0.5));
+      txt(String(k + 1) + '.', x - 18, 380 + row * 46, { size: 32, align: 'right', a, color: col });
+      txt(GAME[k], x + 4, 380 + row * 46, { size: 32, align: 'left', a, color: col });
+    }
+  };
+  side(245, 'Jev', true, 0);
+  side(1675, 'Opponent', false, 1);
+}
+
+/* ───────────────────────── scene 7 · end card ───────────────────────── */
+
+function sEnd(u) {
+  txt('Still learning: long forcing sequences are beyond what the facts describe.', 960, 372,
+    { size: 46, style: 'italic', a: fu(u, 0.2, 0.6), maxW: 1720, color: ink(0.88) });
+  brushLine(880, 468, 1040, 468, 3.6, INK, 0.7, eIOS(prog(u, 0.9, 1.4)), 0.8);
+  txt('hanxl.com/wuziqi', 960, 588, { font: FELL, size: 132, a: fu(u, 1.2, 0.6) });
+  txt('Play Jev', 960, 724, { size: 50, a: fu(u, 1.6, 0.5), ls: 7, color: ink(0.85) });
+  stampSeal(u, 2.0);
+}
+
+/* ───────────────────────── frame ───────────────────────── */
+
+function sceneAlpha(i, t) {
+  const S = SCENES[i], end = i + 1 < SCENES.length ? SCENES[i + 1].start : TOTAL;
+  const a = i === 0 ? 1 : eIOS(prog(t, S.start, S.start + 0.6));
+  const b = i === SCENES.length - 1 ? 1 - eIOS(prog(t, 71.8, 72.3)) : 1 - eIOS(prog(t, end - 0.7, end));
+  return a * b;
+}
+
+function draw(t) {
+  t = clamp(t, 0, TOTAL);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(PAPER_TEX, 0, 0);
+  for (let i = 0; i < SCENES.length; i++) {
+    const S = SCENES[i], end = i + 1 < SCENES.length ? SCENES[i + 1].start : TOTAL + 1;
+    if (t < S.start || t >= end) continue;
+    SA = sceneAlpha(i, t);
+    if (SA > 0.001) S.draw(t - S.start, t);
+  }
+  SA = 1;
+  inkWash(t);
+  const a0 = 1 - eIOS(prog(t, 0, 1.4));                 // paper fades in from ink
+  const a1 = eIOS(prog(t, 72.3, 73.0));                 // and returns to ink
+  const a = Math.max(a0, a1);
+  if (a > 0) { ctx.globalAlpha = a; ctx.fillStyle = INK; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+}
+
+/* ───────────────────────── sound ───────────────────────── */
+
+let AC = null, master = null, bus = null, rev = null, recDest = null, noiseBuf = null, pad = [];
+
+function initAudio() {
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; return; }
+  master = AC.createGain(); master.gain.value = 0.5;
+  master.connect(AC.destination);
+  recDest = AC.createMediaStreamDestination();
+  master.connect(recDest);                               // the recording hears exactly what the speakers do
+  const comp = AC.createDynamicsCompressor();
+  comp.threshold.value = -10; comp.knee.value = 8; comp.ratio.value = 3; comp.attack.value = 0.002; comp.release.value = 0.25;
+  comp.connect(master);
+  bus = AC.createGain(); bus.connect(comp);
+  const conv = AC.createConvolver(); conv.buffer = makeImpulse(2.8);
+  const wet = AC.createGain(); wet.gain.value = 0.3;
+  rev = AC.createGain(); rev.connect(conv); conv.connect(wet); wet.connect(comp);
+  const R = mulberry32(99), len = Math.ceil(AC.sampleRate * 0.08);
+  noiseBuf = AC.createBuffer(1, len, AC.sampleRate);
+  const d = noiseBuf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = R() * 2 - 1;
+}
+function makeImpulse(sec) {
+  const R = mulberry32(5), len = Math.ceil(AC.sampleRate * sec), b = AC.createBuffer(2, len, AC.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = b.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (R() * 2 - 1) * Math.pow(1 - i / len, 3.4) * (i < AC.sampleRate * 0.012 ? i / (AC.sampleRate * 0.012) : 1);
+  }
+  return b;
+}
+function env(g, when, peak, attack, decay) {
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(peak, when + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + attack + decay);
+}
+
+/* Guqin-ish pluck: triangle + an octave partial, fast exponential decay, closing low-pass, a slight slide in. */
+function pluck(f, when, v) {
+  const o = AC.createOscillator(); o.type = 'triangle';
+  o.frequency.setValueAtTime(f * 1.012, when); o.frequency.exponentialRampToValueAtTime(f, when + 0.09);
+  const o2 = AC.createOscillator(); o2.type = 'sine'; o2.frequency.setValueAtTime(f * 2.003, when);
+  const g = AC.createGain(); env(g, when, 0.24 * v, 0.005, 2.0);
+  const g2 = AC.createGain(); env(g2, when, 0.07 * v, 0.004, 0.6);
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 0.7;
+  lp.frequency.setValueAtTime(3400, when); lp.frequency.exponentialRampToValueAtTime(520, when + 1.3);
+  o.connect(g); o2.connect(g2); g.connect(lp); g2.connect(lp); lp.connect(bus);
+  const s = AC.createGain(); s.gain.value = 0.7; lp.connect(s); s.connect(rev);
+  o.start(when); o2.start(when); o.stop(when + 2.3); o2.stop(when + 2.3);
+}
+
+/* The stone click: 30 ms of noise through a 2.5–3.5 kHz band-pass, sharp decay, and a tiny low thump. */
+function click(when, v, tone) {
+  const n = AC.createBufferSource(); n.buffer = noiseBuf;
+  const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3000 * tone; bp.Q.value = 1.3;
+  const g = AC.createGain(); env(g, when, 1.5 * v, 0.0008, 0.029);
+  n.connect(bp); bp.connect(g); g.connect(bus);
+  const s = AC.createGain(); s.gain.value = 0.18; g.connect(s); s.connect(rev);
+  n.start(when); n.stop(when + 0.06);
+  const n2 = AC.createBufferSource(); n2.buffer = noiseBuf;     // the hard edge of the click
+  const hp = AC.createBiquadFilter(); hp.type = 'bandpass'; hp.frequency.value = 3400 * tone; hp.Q.value = 4;
+  const g3 = AC.createGain(); env(g3, when, 0.9 * v, 0.0005, 0.012);
+  n2.connect(hp); hp.connect(g3); g3.connect(bus); n2.start(when); n2.stop(when + 0.03);
+  const o = AC.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(165, when); o.frequency.exponentialRampToValueAtTime(70, when + 0.06);
+  const tg = AC.createGain(); env(tg, when, 0.3 * v, 0.003, 0.08);
+  o.connect(tg); tg.connect(bus); o.start(when); o.stop(when + 0.12);
+}
+
+/* A soft rising shimmer: pentatonic partials entering upward, each gliding up a little. */
+function shimmer(when) {
+  [587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51].forEach((f, i) => {
+    const w = when + i * 0.11;
+    const o = AC.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(f * 0.985, w); o.frequency.linearRampToValueAtTime(f * 1.004, w + 1.4);
+    const g = AC.createGain();
+    g.gain.setValueAtTime(0.0001, w); g.gain.exponentialRampToValueAtTime(0.038, w + 0.4); g.gain.exponentialRampToValueAtTime(0.0001, w + 2.7);
+    o.connect(g); g.connect(bus);
+    const s = AC.createGain(); s.gain.value = 1.2; g.connect(s); s.connect(rev);
+    o.start(w); o.stop(w + 2.8);
+  });
+}
+
+/* The pad: two detuned sines, softly saturated so the slow low-pass swell has something to open. */
+function startPad(T0) {
+  stopPad();
+  const sh = AC.createWaveShaper(); const curve = new Float32Array(1024);
+  for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(2.2 * x); }
+  sh.curve = curve;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 0.9;
+  const f = lp.frequency;
+  f.setValueAtTime(180, T0);
+  [[12, 720], [24, 260], [37, 820], [50, 300], [62, 640], [72, 200]].forEach(([dt, v]) => f.linearRampToValueAtTime(v, T0 + dt));
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0.0001, T0); g.gain.linearRampToValueAtTime(0.1, T0 + 3);
+  g.gain.setValueAtTime(0.1, T0 + TOTAL - 3); g.gain.linearRampToValueAtTime(0.0001, T0 + TOTAL);
+  const mix = AC.createGain(); mix.gain.value = 0.45;
+  const oscs = [146.83, 147.72].map(fr => { const o = AC.createOscillator(); o.type = 'sine'; o.frequency.value = fr; o.connect(mix); o.start(T0); o.stop(T0 + TOTAL + 0.5); return o; });
+  mix.connect(sh); sh.connect(lp); lp.connect(g); g.connect(bus);
+  const s = AC.createGain(); s.gain.value = 0.35; g.connect(s); s.connect(rev);
+  pad = oscs;
+}
+function stopPad() { for (const o of pad) { try { o.stop(); } catch (e) {} } pad = []; }
+
+function fire(ev, when) {
+  if (ev.k === 'pluck') pluck(ev.f, when, ev.v);
+  else if (ev.k === 'click') click(when, ev.v, ev.tone);
+  else if (ev.k === 'shimmer') shimmer(when);
+}
+
+/* ───────────────────────── playback ───────────────────────── */
+
+let useAudio = false, playing = false, paused = false, finished = false, started = false;
+let t0 = 0, evIdx = 0, pT0 = 0, pPausedAt = 0, rec = null;
+
+function nowT() {
+  if (useAudio) return AC.currentTime - t0;
+  return paused ? pPausedAt : performance.now() / 1000 - pT0;
+}
+
+function schedule(t) {
+  if (!useAudio) return;
+  const horizon = t + 0.25;
+  while (evIdx < EVENTS.length && EVENTS[evIdx].t <= horizon) {
+    const ev = EVENTS[evIdx++], when = t0 + ev.t;
+    if (when < AC.currentTime - 0.05) continue;         // far too late (e.g. a hidden tab): skip, never pile up
+    fire(ev, Math.max(when, AC.currentTime));
+  }
+}
+
+function frame() {
+  if (!playing || paused) return;
+  const t = Math.max(0, nowT());
+  schedule(t);
+  draw(Math.min(t, TOTAL));
+  if (t >= TOTAL) { finish(); return; }
+  requestAnimationFrame(frame);
+}
+
+async function start() {
+  if (!AC) initAudio();
+  if (AC) { try { await Promise.race([AC.resume(), sleep(1500)]); } catch (e) {} }
+  useAudio = !!AC && AC.state === 'running';
+  evIdx = 0; finished = false; paused = false; playing = true; started = true;
+  btn.style.display = 'none';
+  if (useAudio) { t0 = AC.currentTime + 0.08; startPad(t0); }
+  else pT0 = performance.now() / 1000;
+  requestAnimationFrame(frame);
+}
+
+function finish() {
+  playing = false; finished = true;
+  if (RECORD) { setTimeout(() => { try { rec && rec.state !== 'inactive' && rec.stop(); } catch (e) {} }, 350); return; }
+  btn.textContent = 'Play again ▶'; btn.style.display = '';
+}
+
+function toggle() {
+  if (RECORD) return;
+  if (!started || finished) { start(); return; }
+  if (paused) {
+    paused = false;
+    if (useAudio) AC.resume(); else pT0 = performance.now() / 1000 - pPausedAt;
+    btn.style.display = 'none';
+    requestAnimationFrame(frame);
+  } else {
+    if (!useAudio) pPausedAt = nowT();
+    paused = true;
+    if (useAudio) AC.suspend();
+    btn.textContent = 'Play ▶'; btn.style.display = '';
+  }
+}
+
+async function recordMode() {
+  document.body.classList.add('rec');
+  btn.style.display = 'none';
+  initAudio();
+  if (AC) { try { await Promise.race([AC.resume(), sleep(1500)]); } catch (e) {} }
+  const audioOK = !!AC && AC.state === 'running';
+  draw(0);
+  const vs = cv.captureStream(60);
+  const tracks = [...vs.getVideoTracks()];
+  if (audioOK) tracks.push(...recDest.stream.getAudioTracks());
+  const stream = new MediaStream(tracks);
+  const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+    .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
+  const chunks = [];
+  rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 10e6, audioBitsPerSecond: 192e3 } : {});
+  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    const blob = new Blob(chunks, { type: rec.mimeType || mime || 'video/webm' });
+    window.__videoBlobUrl = URL.createObjectURL(blob);
+    window.__videoMime = blob.type;
+    window.__videoBytes = blob.size;
+    window.__done = true;
+  };
+  window.__recInfo = { mime, audioState: AC ? AC.state : 'none', audioTracks: stream.getAudioTracks().length, videoTracks: stream.getVideoTracks().length };
+  rec.start(1000);
+  await start();
+}
+
+/* ───────────────────────── hooks & boot ───────────────────────── */
+
+async function loadFonts() {
+  const specs = ['400 48px "IM Fell English"', 'italic 400 48px "IM Fell English"',
+                 '400 48px "EB Garamond"', 'italic 400 48px "EB Garamond"'];
+  const jobs = specs.map(s => document.fonts.load(s, 'Gomoku vs Jev'));
+  jobs.push(document.fonts.load('700 48px "Noto Serif SC"', '棋'));
+  await Promise.race([Promise.allSettled(jobs), sleep(8000)]);
+  await Promise.race([document.fonts.ready, sleep(3000)]);
+  window.__fonts = specs.map(s => [s, document.fonts.check(s, 'Gomoku')])
+    .concat([['700 48px "Noto Serif SC"', document.fonts.check('700 48px "Noto Serif SC"', '棋')]]);
+}
+
+const READY = (async () => {
+  await loadFonts();
+  PAPER_TEX = makePaper();
+  BOARD_S = makeBoard(440, false, 3301);
+  BOARD_L = makeBoard(940, true, 1507);
+  FRAG = makeFragment();
+  draw(0);
+})();
+
+window.__TOTAL = TOTAL;
+window.__scenes = SCENES.map((s, i) => ({ name: s.name, start: s.start, end: i + 1 < SCENES.length ? SCENES[i + 1].start : TOTAL }));
+window.__game = GAME.slice();
+window.__ready = READY;
+window.__state = () => ({ t: started ? nowT() : 0, playing, paused, finished, useAudio, audio: AC ? AC.state : 'none' });
+/* Draw the frame at time t, deterministically. Never touches audio. */
+window.__seek = async t => { await READY; btn.style.display = 'none'; playing = false; draw(t); return t; };
+/* Replay scene 6's sequence and report the first five, for either colour. */
+window.__checkGame = () => {
+  const b = new Map(), D = [[1, 0], [0, 1], [1, 1], [1, -1]];
+  const at = (c, r) => b.get(c + ',' + r);
+  for (let k = 0; k < GAME.length; k++) {
+    const [c, r] = pc(GAME[k]), col = k % 2 ? 'white' : 'black';
+    if (at(c, r)) return { error: 'occupied ' + GAME[k], move: k + 1 };
+    b.set(c + ',' + r, col);
+    for (const [dc, dr] of D) {
+      const line = [[c, r]];
+      for (let s = 1; at(c + dc * s, r + dr * s) === col; s++) line.push([c + dc * s, r + dr * s]);
+      for (let s = 1; at(c - dc * s, r - dr * s) === col; s++) line.unshift([c - dc * s, r - dr * s]);
+      if (line.length >= 5) return { move: k + 1, of: GAME.length, colour: col, length: line.length, cells: line.map(([x, y]) => pname(x, y)) };
+    }
+  }
+  return { move: null };
+};
+
+btn.addEventListener('click', () => { READY.then(toggle); });
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); if (!e.repeat) READY.then(toggle); }
+});
+/* A focused button would also activate on Space's keyup: keep it to one toggle. */
+window.addEventListener('keyup', e => { if (e.code === 'Space' || e.key === ' ') e.preventDefault(); });
+
+if (RECORD) READY.then(recordMode);
+})();
+</script>
+</body>
+</html>
