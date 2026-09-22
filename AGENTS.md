@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents working in this repository.
 
 ## Status
 
@@ -22,9 +22,9 @@ With both fixed, Jev beats the threat-aware opponent 3-0 at even and holds to a 
 Watch out for: `critical_points` precision. Listing every empty in a window instead of the ones
 adjacent to the stones' span dropped accuracy from 100% to 60%. Dilution costs as much as absence.
 
-`app/api/move/route.ts` hardcodes `informed: true` — the naked convention is no longer reachable
-from the UI and survives only as a measurement baseline in `scripts/`. It logs every UI move to
-`runs/ui-<date>.jsonl` (local only).
+`app/api/move/route.ts` plays 详注 (`informed: true`) unless the page asks for 素盘. The naked
+convention — neither of those — is no longer reachable from the UI and survives only as a
+measurement baseline in `scripts/`. It logs every UI move to `runs/ui-<date>.jsonl` (local only).
 
 ## 禁手 (Renju forbidden moves)
 
@@ -112,6 +112,131 @@ handicap the initiative is not black's, and an attacker's prior may be wrong the
 Instructions alone still move nothing — `PRIORITY` scored 0/15 without `lines_on_board`. This works
 because the state already makes the position visible; it changes how Jev *weighs* what it sees.
 
+## `double_threat` — the one state field that measurably raised black's win rate
+
+`point_effects` collapses every point to its single strongest shape, so a move making a four AND an
+open three is indistinguishable from a plain four — and that shape is how gomoku is actually won.
+`double_threat` lists both, and only fires when there are two or more **forcing** shapes — a four,
+or an **open** three (a handful of points per game; entry counts are unchanged, so it is not the
+`builds_on` dilution again). `scripts/test-double-threat.ts` holds the definition.
+
+**The +8.2pp below was measured on a broken definition.** Until 2026-09-23 the field counted any
+three, blocked or not, so two blocked threes — which force nothing — were labelled 四三 / 双三 and
+sorted (+45) above a real four. In the logged human games that was 70 of 131 labels; one human-game
+loss (ply 24, G9 at 55% over the correct K13) was exactly that. The fixed field agrees with
+`countFours + countOpenThrees >= 2` from `lib/renju.ts` on every logged point except five-plus-three.
+The fix is **unmeasured** — re-run `scripts/ab.ts` before quoting a number for it.
+`DoubleThreatMode` (`lib/effects.ts`) keeps all three definitions: `legacy`, `fixed` (what `true`
+means), and `split` — `fixed` plus `shapes_on_two_lines` for the points `legacy` mislabelled, ranked
+exactly as `legacy` ranked them. 20 paired games vs L3: legacy 11-9, fixed 11-9, split 15-5 (p = 0.125).
+Most discordant games diverged before the field was involved, because **any wording change in the
+state reshuffles near-tied points** — replay `runs/ab-*.jsonl` (it now logs moves) before reading a
+small A/B as mechanism. `ARMS=legacy,split BASELINE=legacy scripts/ab.ts 170`.
+`shapes_on_two_lines` is **not `builds_on` again**: it adds no entries and no "two"s — the same
+points `legacy` mislabelled. It first kept legacy's +45 rank too; that was lowered to +12 because it
+put two blocked threes above every real block of an open three (seed 51010).
+
+**`leaves`** (beside a `blocks_*` three): what that line can still make for the opponent once the
+point is taken — "can still make a four at …", "cannot make a four with one stone", or "can no
+longer make five". The two ends of an open three are not equal, and before this field they read
+identically (51012: J9 left a four at J14, J13 killed the line). A block that leaves a four gets no
+attack-while-defending bonus and ranks below one that does not. `PRIORITY_KEY_LEAVES` item 6 points at
+it; `leaves` is written on **open** threes only (on a blocked three its "can no longer make five" read
+as a reason to play there). `dropBlockedThreeBlocks` then removes `blocks_*` for blocked threes
+entirely — the commonest remaining lure away from `white_would_make`. The page sends all of it for black.
+
+**Where the facts stop.** The remaining losses are the opponent's continuous-four (VCF) starts, which
+carry no entry. Stating "white can four-chain to five from here" would put a search result in the
+state — the same computation as `winningReplies`, which the owner has ruled out as cheating. `app/api/move/route.ts` passes `"split"`; never pass bare `true` there.
+`<colour>_would_make` had the same defect, so its p = 0.37 rejection was of the broken version too.
+
+**Measured +8.2pp over 680 games against L3, pooled McNemar p = 0.014**, for the black seat only.
+See RESULTS.md: the replication reproduced the direction at +5.3pp rather than the discovery run's
++11.1pp, so believe the smaller number. `app/api/move/route.ts` now enables it for **both seats** —
+asked for, not measured, on white. The field is computed for the seat Jev holds, so as white it
+describes white's own shapes. Do not "fix" it back to black-only without being asked.
+
+Two lessons from that campaign, both expensive:
+- **A 12-game A/B against a ~43% baseline ranks candidates at random.** `double_threat` screened at
+  net 0 and was nearly dropped; the arm that led the screen 9-3 turned out to change Jev's move in
+  1 opening out of 8. Use `scripts/ab.ts` (parallel, ~170 games/arm, paired + McNemar), not
+  `colour-check`, to decide anything.
+- **A good mechanism story is not evidence.** `<colour>_would_make` was built from a measured
+  failure (`scripts/test-forced.ts`: Jev misses 65% of the moves that defuse an opponent's coming
+  double threat, while missing 0% of immediate fives), aimed exactly at it, and demonstrably added a
+  fact the state could not previously express. It measured p = 0.37 — **on a definition that counted
+  blocked threes** (see below). Fixed, and paired with `PRIORITY_KEY`, it is now **on for black**.
+
+**`PRIORITY_KEY` (black, 详注).** Replay showed Jev *saw* `white_would_make` on the point that beat it
+and played a plain four, because `PRIORITY_LEAN` item 3 said "if you can make a four, play it". The
+new ladder drops that rule and gives `double_threat` / `white_would_make` their own rungs. Over 20
+paired games the take-rate of the `white_would_make` point went 15% -> 56% and plain fours 32% -> 22%
+(15-5 vs 13-7). The instruction that moved Jev was a **removed** one that contradicted the state.
+
+`lib/transport.ts` now retries 429/529/5xx and network failures with jittered backoff, which
+this file had specified from the start and nothing implemented. It matters at measurement scale:
+the old harness scored an errored game as a LOSS.
+
+## The second pass — round two, one request per candidate
+
+`nakedJevMove({ verify: true })`. Round one is unchanged. Round two takes round one's top
+`VERIFY_TOP_K` (3) candidates and, **for each, issues its own request against the board as it would
+stand after that move**, asking two `noul` questions:
+
+- `unanswerable` — does Jev now have a threat the opponent cannot fully answer with one stone?
+- `refuted` — does the opponent now have a forcing win?
+
+**One request per candidate, not more questions in one request.** Both questions are about the
+position AFTER the move, and a `systemOne` call carries one state. This is the same mistake
+`predicted_reply` already made once, predicting the opponent against a board without Jev's stone on
+it. The three requests run in parallel, so the cost is one round trip.
+
+Policy lives in code, never in the prompt: `score = p1 + VERIFY_ALPHA * (unanswerable - refuted)`,
+with `VERIFY_TOP_K`, `VERIFY_ALPHA` (0.5) and `VERIFY_GATE` (0.9 — skip the pass when round one is
+already that sure) all exported constants. The raw answers are kept in `MoveTrace.verified`, so
+retuning any of them costs no inference. A failure in round two is caught and round one stands.
+
+Two things that will look like bugs and are not:
+- `latencyMs` is reassigned after the pass. It is what the player waits for, so it has to include it.
+- The prediction request and the returned trace use `chosen`/`chosenIdx`, not round one's
+  `best.choice` — otherwise Jev would predict the reply to a move it did not play.
+
+**Measured against L3, 12 games per arm on identical seeds: 8-4 without it, 7-5 with it — no gain,
+so it is NOT wired into `app/api/move/route.ts`.** It stays available behind the flag because the
+calibration says the mechanism works and the policy is what is wrong: over 216 candidate judgments
+`unanswerable` separates true from false by +0.240 and `refuted` by only +0.170, yet both carry the
+same weight — and across 10 switches the pass was 1 better, 2 worse, 7 neutral. Full numbers and a
+pre-registered next step in RESULTS.md. Do not re-enable it without re-measuring.
+
+**The scoreboard cannot see this feature.** The pass only changes anything on the moves
+where it switches, which is single digits per run. Judge the questions directly:
+`scripts/test-verify.ts` ground-truths every candidate against L3's own tactics (does Jev still hold
+a winning point after white's best reply? does white hold one?) and reports the separation between
+what Jev says on the true cases and the false ones.
+
+## The ruler: L3, and why L2 could only reject things
+
+`lib/opponent.ts` L0-L2 are random / greedy / one-ply-threat. **L2 is saturated against Jev-as-black
+(8-0 at even), so against it a candidate improvement can only be measured as harm** — which is
+literally how both rejections below were produced. L3 exists to make black's win rate measurable:
+
+- **VCF** (continuous fours, depth 8, 400-node budget), **双威胁** (四三/双三 via `countFours` /
+  `countOpenThrees` from `lib/renju.ts`), and a **one-step veto** on the opponent's winning replies.
+- 20-0 as black and 19-1 as white against L2; ~10ms/ply. `npm test` includes `scripts/test-l3.ts`.
+- `npm run colour` defaults to L3; `JEV_LEVEL=2` reproduces the older runs. `npm run ladder [games]
+  [maxLevel]` reaches it with `maxLevel` 3.
+
+Two traps it was built out of, both of which look like working code:
+- **A plain four is not a win.** Asking "does this player now have a five-completion point" is true
+  of every four, and a four is just blocked. `vcfAfter` judges a move as the *first forcing stone*:
+  no completion → not forcing, one → the opponent blocks and the search continues, two → open four.
+- **A veto that can only filter is not a defence.** The saving move usually scores near zero for the
+  defender, because `scorePoint`'s `denied` term is a MAX over the opponent's lines and blocking one
+  of two threes lowers that max by nothing. `winningReplies` generates the opponent's key points
+  from geometry — every four-making point, plus every point critical to two threats in *different*
+  directions — and the defence chooses among those. Do not replace it with a top-K by static score:
+  those scores tie constantly and the slice drops the key point.
+
 ## 開盤直線 — real, and both obvious fixes were measured and rejected
 
 Jev as black builds along one straight line: `1-line` (share of its own stones on a single line)
@@ -128,7 +253,22 @@ extending a single line (and multi-"two" points were dropped entirely).
   less certain.
 
 See RESULTS.md. L2 may not punish a straight line the way a human does, so it may be the wrong
-ruler for this particular complaint.
+ruler for this particular complaint. Telling Jev the 执黑先行 experience for the first four stones
+only (`PRIORITY_OPENING`) was the opening-scoped version of that rewrite. Against L3, 5 paired
+seeds, both arms finished 4-1 with the same wins and the same loss. Ranking a diagonal
+step off that line above "make an open three" (`PRIORITY_DIAGONAL`, seeds 13000–13004)
+did move the opening, onto one diagonal instead of one horizontal, and lost 4 of the 5
+games the straight opening won. The same inversion for the whole game
+(`diagonal_branches` above the open three, seeds 14000–14004) lost the only game
+whose result changed. Do not put a diagonal two back above an open three.
+
+详注 now sends `PRIORITY_LEAN` / `PRIORITY_LEAN_WHITE` with `leanDiagonal`. An open
+three stays above a diagonal step. When several points make an open three, the
+diagonal one is preferred. Blocking the opponent's open three stays above making
+your own — their open three becomes an open four if it is left for a move.
+`diagonal_branches` is only reached when no open three can be made or blocked.
+With one stone the list is the empty diagonal neighbours. With a diagonal that
+is blocked on both ends, the list is the other diagonal.
 
 ## point_effects — what a move would create
 
@@ -147,6 +287,23 @@ Measured two ways, and the honest answer is mixed:
 Cost: +6% input tokens (3378 → 3584), no latency change.
 
 L2 is a poor proxy for a human, and this was never measured against one.
+
+## 素盘
+
+The 对局 card switches what Jev is told. 详注 is the informed state described above. 素盘
+(`brief: true` on `/api/move`, `buildBriefState` in `lib/jev.ts`) sends four facts:
+
+- this is 五子棋
+- which colour Jev holds
+- the board as it stands — the diagram plus the two stone lists
+- whether 禁手 is on, and if so which rules, stated as facts
+
+No `lines_on_board`, no `point_effects`, no move history, no `forbidden_analysis`, and the move
+question carries no `priority_order`. Both seats. The same observation questions (`position`,
+`opponent_threat`) are still asked, because those drive the trace card; they are not part of the
+briefing. Layer 0 still drops black's forbidden points from the option set — a forbidden point is
+an instant loss, not a hint withheld. Unmeasured. Do not enrich `buildBriefState` without being
+asked, and do not fold it back into `buildState`.
 
 ## UI
 
@@ -387,8 +544,15 @@ Verified contract (2026-09-19):
   native API calls it `'noul'`. `choice` and `score` keep their names. Keep the whole question
   set in one module so swapping transport is a single-file change. The API is `experimental_*`
   — pin the `ai` version and re-check it on upgrade.
-- Pricing: input `$0.042 / 1M` tokens, output free. **Inference is effectively free at this
-  scale** — one move can afford 30+ parallel questions. Design for fan-out, not frugality.
+- Pricing: input `$0.042 / 1M` tokens, output free. Per MOVE that is nothing — one move can afford
+  30+ parallel questions, so design for fan-out, not frugality.
+  **But "effectively free" stops being true at measurement scale, and it bit hard once:** a single
+  session of A/B runs (~1,050 games, ~16.7k requests, ~57M input tokens) **exhausted the
+  organisation's TypeSafe credits and took production down with a 402**, because `npm run dev`, the
+  scripts and the deployed app all use the same key. Before a run of this size, check the balance at
+  https://console.typesafe.ai/settings/billing and budget it: at ~3.4k input tokens per move and
+  ~16 Jev moves per game, **a 170-game arm is ~9.3M tokens**. A 402 is a billing error, not a
+  transient one, so `lib/transport.ts` deliberately does not retry it.
 
 Consequences for this codebase:
 1. Code must enumerate candidate moves. Jev cannot name a coordinate that isn't in `criteria`.

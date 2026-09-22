@@ -8,7 +8,7 @@
     "start": "next start",
     "probe": "tsx --env-file-if-exists=.env.local scripts/probe.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx scripts/test-rules.ts && tsx scripts/test-lines.ts && tsx scripts/test-renju.ts && tsx scripts/test-exploit.ts && tsx scripts/test-opponent.ts",
+    "test": "tsx scripts/test-rules.ts && tsx scripts/test-lines.ts && tsx scripts/test-renju.ts && tsx scripts/test-exploit.ts && tsx scripts/test-opponent.ts && tsx scripts/test-l3.ts && tsx scripts/test-brief.ts && tsx scripts/test-double-threat.ts && tsx scripts/test-diagonal.ts --facts && tsx scripts/test-lean.ts --facts",
     "ladder": "tsx --env-file-if-exists=.env.local scripts/ladder.ts",
     "trap": "tsx --env-file-if-exists=.env.local scripts/test-trap.ts",
     "colour": "tsx --env-file-if-exists=.env.local scripts/colour-check.ts"

@@ -75,6 +75,24 @@ export function describeMissingKey(t: Transport): string | null {
   return null;
 }
 
+/**
+ * Retry on the two statuses the API documents as transient, plus outright
+ * network failures. AGENTS.md has called for this from the start and it was
+ * never implemented; at one request per move nobody noticed, but a measurement
+ * run makes hundreds in a row and a single 429 there does not just fail — the
+ * harness scores the errored game as a loss, so a transient blip becomes a data
+ * point. 401/422 are not retried: a bad key or a malformed question set will
+ * fail identically forever.
+ */
+const RETRY_DELAYS_MS = [500, 1500, 4000];
+
+function isTransient(err: unknown): boolean {
+  const m = String((err as any)?.message ?? err);
+  if (/\b(429|529|500|502|503|504)\b/.test(m)) return true;
+  // fetch() rejects with a TypeError on DNS/connection failures.
+  return /fetch failed|ECONNRESET|ETIMEDOUT|network|socket hang up/i.test(m);
+}
+
 export async function callJev(opts: {
   state: unknown;
   questions: Record<string, Question>;
@@ -83,7 +101,21 @@ export async function callJev(opts: {
   const transport = activeTransport();
   const missing = describeMissingKey(transport);
   if (missing) throw new Error(missing);
-  return transport === "native" ? callNative(opts) : callGateway(opts);
+  const run = () => (transport === "native" ? callNative(opts) : callGateway(opts));
+
+  let last: unknown;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      last = err;
+      if (opts.signal?.aborted || attempt === RETRY_DELAYS_MS.length || !isTransient(err)) break;
+      // Jitter so parallel callers do not all come back at the same instant.
+      const wait = RETRY_DELAYS_MS[attempt] * (0.75 + Math.random() * 0.5);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  throw last;
 }
 
 async function callGateway(opts: {

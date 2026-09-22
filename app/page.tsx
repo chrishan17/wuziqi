@@ -72,6 +72,8 @@ export default function Page() {
   const [humanColor, setHumanColor] = useState<Player>(BLACK);
   const jevColor = other(humanColor);
   const [rules, setRules] = useState<Rules>(FREESTYLE);
+  /** 素盘: tell Jev only the game, its colour, the board, and whether 禁手 is on. */
+  const [brief, setBrief] = useState(false);
   const [brokeRule, setBrokeRule] = useState<ForbiddenKind | null>(null);
   const [board, setBoard] = useState<Board>(() => createBoard(SIZE));
   // Tagged, not bare labels: `normaliseHistory` in lib/jev.ts infers strict
@@ -129,6 +131,7 @@ export default function Page() {
     historyNow: HistoryEntry[],
     jev: Player,
     rulesNow: Rules,
+    briefNow: boolean,
   ) {
     const mine = gen.current;
     const alive = () => gen.current === mine;
@@ -138,7 +141,7 @@ export default function Page() {
       const res = await fetch(`${BASE_PATH}/api/move`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ board: boardNow, history: historyNow, jev, rules: rulesNow }),
+        body: JSON.stringify({ board: boardNow, history: historyNow, jev, rules: rulesNow, brief: briefNow }),
       });
       const data = await res.json();
       if (!alive()) return;
@@ -216,10 +219,10 @@ export default function Page() {
     }
     if (afterHuman.every((c) => c !== 0)) return setStatus("draw");
 
-    await jevTurn(afterHuman, nextHistory, jevColor, rules);
+    await jevTurn(afterHuman, nextHistory, jevColor, rules, brief);
   }
 
-  function reset(h = handicap, colour: Player = humanColor, r: Rules = rules) {
+  function reset(h = handicap, colour: Player = humanColor, r: Rules = rules, b = brief) {
     gen.current += 1;
     const start = h > 0 ? placeHandicap(createBoard(SIZE), SIZE, colour, h) : createBoard(SIZE);
     const seeded: HistoryEntry[] = [];
@@ -241,7 +244,12 @@ export default function Page() {
     setBrokeRule(null);
     setThinking(false);
     // Black opens. If that is Jev, it moves before the human gets a turn.
-    if (other(colour) === BLACK) void jevTurn(start, seeded, BLACK, r);
+    if (other(colour) === BLACK) void jevTurn(start, seeded, BLACK, r, b);
+  }
+
+  function chooseBrief(next: boolean) {
+    setBrief(next);
+    reset(handicap, humanColor, rules, next);
   }
 
   function toggleRule(k: keyof Rules) {
@@ -443,6 +451,20 @@ export default function Page() {
                 </button>
               ))}
             </div>
+            <div className="meta" style={{ marginTop: 11 }}>告诉 Jev。换了即开新局。</div>
+            <div className="dial">
+              <button className="btn" data-on={brief ? 0 : 1} onClick={() => chooseBrief(false)}>
+                详注
+              </button>
+              <button className="btn" data-on={brief ? 1 : 0} onClick={() => chooseBrief(true)}>
+                素盘
+              </button>
+            </div>
+            <div className="meta" style={{ marginTop: 8 }}>
+              {brief
+                ? "只说这是五子棋、Jev 执哪一方、当前盘面、有没有禁手。"
+                : "连同盘上的线、落点的作用、先后手的取舍，一并告诉它。"}
+            </div>
 
             {/* Uncontrolled on purpose: `rules` always starts FREESTYLE, so the fold
                 starts closed, and an `open={anyRule}` prop would slam it shut under
@@ -487,7 +509,9 @@ export default function Page() {
           {trace && (
             <div className="card">
               <h2>{trace.move}</h2>
-              <div className="meta">Jev 此手 · 全盘 {trace.optionCount} 个空点中选出</div>
+              <div className="meta">
+                Jev 此手 · 全盘 {trace.optionCount} 个空点中选出 · {brief ? "素盘" : "详注"}
+              </div>
 
               <div className="bars">
                 {trace.topMoves.slice(0, 6).map((m) => (

@@ -99,4 +99,4 @@ scripts/probe.ts    基线测量
 scripts/test-rules.ts  25 条规则断言
 ```
 
-设计背景、Jev 的 API 契约、以及下一步的引擎辅助方案，见 [CLAUDE.md](./CLAUDE.md)。
+设计背景、Jev 的 API 契约、以及下一步的引擎辅助方案，见 [AGENTS.md](./AGENTS.md)。

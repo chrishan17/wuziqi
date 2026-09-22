@@ -21,22 +21,48 @@ import {
   type Board, type Player,
   applyMove, createBoard, emptyCells, isWinningMove, toLabel,
 } from "../lib/board";
-import { makeRng, opponentMove, placeHandicap } from "../lib/opponent";
+import { type Level, makeRng, opponentMove, placeHandicap } from "../lib/opponent";
 import { nakedJevMove, PRIORITY, PRIORITY_INITIATIVE, PRIORITY_SHAPE } from "../lib/jev";
 import { enumerateThreats } from "../lib/lines";
 import { activeTransport, describeMissingKey } from "../lib/transport";
 
 const SIZE = Number(process.env.BOARD_SIZE ?? 15);
-const LEVEL = 2 as const;
+/**
+ * The ruler. L3 by default: black is 8-0 against L2 at even, so L2 can only
+ * measure harm — see RESULTS.md and lib/opponent.ts. Override with JEV_LEVEL=2
+ * to reproduce an older run.
+ */
+const LEVEL = Number(process.env.JEV_LEVEL ?? 3) as Level;
 const RANK: Record<string, number> = { two: 2, three: 3, four: 4, five: 5 };
+/**
+ * Seeds are derived from this, NOT from the arm, so every arm plays the same
+ * games and the results can be read paired. Override it for a confirmation run:
+ * re-using the screening seeds would replay the games the winner was picked on,
+ * which is how a screen's winner's curse becomes a shipped regression.
+ * Consumed so far: 5000+ by scripts/test-verify.ts, 9000+ by the screen.
+ */
+const SEED_BASE = Number(process.env.SEED_BASE ?? 9000);
 
-type Arm = { name: string; jev: Player; priority: string[]; multiAxis?: boolean };
+type Arm = {
+  name: string; jev: Player; priority: string[];
+  multiAxis?: boolean; verify?: boolean; doubleThreat?: boolean; openingRelations?: boolean;
+  keyPoints?: boolean;
+};
 const ARMS: Arm[] = [
-  // Shipped: offence-leaning ladder, "extend your own longest line".
+  // Control: shipped ladder, nothing added.
   { name: "black+atk", jev: 1, priority: PRIORITY_INITIATIVE },
-  // Candidate: same ladder, but item 7 asks for two crossing lines instead of
-  // one long one. Same seeds as the arm above.
-  { name: "black+shape", jev: 1, priority: PRIORITY_SHAPE },
+  // The points from which the OPPONENT makes a 四三 / 双三. Derived from a
+  // measured failure, not a hunch: over 8 games, positions needing exactly that
+  // move arose 31 times and Jev missed 20 (scripts/test-forced.ts), while
+  // missing 0/5 immediate fives. `blocks_*` is built from threats that already
+  // exist, so the state had no way to say it.
+  { name: "black+key", jev: 1, priority: PRIORITY_INITIATIVE, keyPoints: true },
+  // Screened and inside the noise on seeds 9000+ (net -1, 0, +2, -1 paired vs
+  // control). Kept switchable, not deleted.
+  // { name: "black+verify2", jev: 1, priority: PRIORITY_INITIATIVE, verify: true },
+  // { name: "black+dual", jev: 1, priority: PRIORITY_INITIATIVE, doubleThreat: true },
+  // { name: "black+open", jev: 1, priority: PRIORITY_INITIATIVE, openingRelations: true },
+  // { name: "black+shape", jev: 1, priority: PRIORITY_SHAPE },
 ];
 
 type Rec = {
@@ -48,6 +74,8 @@ type Rec = {
   clusters: number;
   makes: number;    // RANK of the best shape this move creates for Jev
   lineFrac: number; // largest share of Jev's stones sitting on ONE line
+  verifyRan: boolean;    // did the second pass run this move?
+  verifySwitched: boolean; // did it move Jev off its round-one choice?
 };
 
 /** Disconnected groups of `p`'s stones, 8-connected with a 1-point gap allowed. */
@@ -158,7 +186,7 @@ async function playGame(arm: Arm, seed: number, out: Rec[], handicap = 0) {
     if (jevToMove) {
       let t;
       try {
-        t = await nakedJevMove({ board, size: SIZE, jev, history, informed: true, priority, multiAxis: arm.multiAxis });
+        t = await nakedJevMove({ board, size: SIZE, jev, history, informed: true, priority, multiAxis: arm.multiAxis, verify: arm.verify, doubleThreat: arm.doubleThreat, openingRelations: arm.openingRelations, keyPoints: arm.keyPoints });
       } catch (e: any) {
         return { winner: "opponent" as const, plies: ply, reason: String(e?.message ?? e) };
       }
@@ -172,6 +200,8 @@ async function playGame(arm: Arm, seed: number, out: Rec[], handicap = 0) {
         clusters: clusters(board, SIZE, jev),
         makes: bestShapeFor(board, SIZE, t.moveIdx, jev),
         lineFrac: lineFraction(board, SIZE, jev),
+        verifyRan: t.verified !== null,
+        verifySwitched: t.verifySwitched,
       });
       if (isWinningMove(board, SIZE, t.moveIdx)) return { winner: "jev" as const, plies: ply };
     } else {
@@ -207,7 +237,7 @@ async function main() {
   const handicap = Number(process.argv[3] ?? 0);
   const missing = describeMissingKey(activeTransport());
   if (missing) { console.error(missing); process.exit(1); }
-  console.log(`章法 check · ${SIZE}x${SIZE} · L2 opponent · ${games} games/seat · handicap ${handicap} · ${activeTransport()}\n`);
+  console.log(`章法 check · ${SIZE}x${SIZE} · L${LEVEL} opponent · ${games} games/seat · handicap ${handicap} · seeds ${SEED_BASE}+ · ${activeTransport()}\n`);
 
   const recs: Rec[] = [];
   const score: Record<string, { w: number; l: number; d: number; plies: number[] }> = {};
@@ -217,7 +247,7 @@ async function main() {
     process.stdout.write(`  ${seat.padEnd(10)} `);
     for (let g = 0; g < games; g++) {
       // Seeded by colour, not by arm: the two black arms face identical games.
-      const r = await playGame(arm, 9000 + arm.jev * 100 + g, recs, handicap);
+      const r = await playGame(arm, SEED_BASE + arm.jev * 100 + g, recs, handicap);
       const s = score[seat];
       if (r.winner === "jev") s.w++; else if (r.winner === "opponent") s.l++; else s.d++;
       s.plies.push(r.plies);
@@ -232,6 +262,16 @@ async function main() {
     for (const arm of ARMS) {
       console.log(`  ${name.padEnd(14)} ${arm.name.padEnd(10)}${report(recs, arm.name, lo, hi)}`);
     }
+  }
+  for (const arm of ARMS) {
+    if (!arm.verify) continue;
+    const r = recs.filter((x) => x.seat === arm.name);
+    const ran = r.filter((x) => x.verifyRan);
+    console.log(
+      `\n  ${arm.name}: second pass ran on ${ran.length}/${r.length} moves ` +
+        `(${((100 * ran.length) / (r.length || 1)).toFixed(0)}%), ` +
+        `switched Jev off round one ${r.filter((x) => x.verifySwitched).length} times.`,
+    );
   }
   console.log(`\n  top1/entropy: how peaked best_move is (entropy 1 = uniform = no idea).`);
   console.log(`  connected: % of moves next to a stone Jev already owns. clusters: own groups.`);

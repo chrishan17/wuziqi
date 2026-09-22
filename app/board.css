@@ -404,12 +404,14 @@
 }
 .hand-img { width: 100%; height: 100%; display: block; user-select: none; }
 
-/* The stone in the pinch. It IS a `.stone[data-p="2"]`, so the stone the player
-   sees being carried is the same object that lands on the board — it is laid
-   exactly over the one painted into the PNG, at the same centre and diameter.
-   150/1128 = 13.298% of the image width; `aspect-ratio` keeps it circular even
-   though the wrapper is not square, and margin percentages resolve against the
-   wrapper's WIDTH in both axes.
+/* The stone in the pinch. The PNG used to have an ivory stone painted into it,
+   so every move — black or white — arrived holding white, and the crescent
+   past this circle stayed white even when `data-p` was black. That stone is
+   gone from the art; this element is the only one, and `data-p` is the colour
+   actually being played (1 black, 2 white), the same `.stone` that lands.
+   Centre and diameter are unchanged: 150/1128 = 13.298% of the image width.
+   `aspect-ratio` keeps it circular even though the wrapper is not square, and
+   margin percentages resolve against the wrapper's WIDTH in both axes.
    Do NOT scale the wrapper to resize the hand — that takes this stone off 0.88
    cell and it stops matching the board. Regenerate the art instead. */
 .hand-stone {

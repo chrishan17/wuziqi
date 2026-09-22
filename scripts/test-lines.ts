@@ -55,5 +55,17 @@ check("XXOXX is blocked", ["H8", "H9", "H11", "H12"], null, ["H10"]);
 check("XXXXO one side blocked", ["H8", "H9", "H10", "H11"], { severity: "four", critical: ["H7"] }, ["H12"]);
 check("XXXX walled both ends", ["H8", "H9", "H10", "H11"], null, ["H7", "H12"]);
 
+function blackNote(black: string[], white: string[] = []) {
+  return enumerateThreats(build(black, white), S, 2).filter((t) => t.player.startsWith("black") && t.severity === "three");
+}
+function checkLive(name: string, black: string[], white: string[], live: boolean) {
+  const t = blackNote(black, white)[0];
+  const ok = !!t && t.live === live && t.note.startsWith(live ? "open three" : "three, blocked");
+  if (ok) console.log(`  PASS ${name.padEnd(26)} ${t.note.slice(0, 48)}`);
+  else { fail++; console.log(`  FAIL ${name.padEnd(26)} live=${t?.live} ${t?.note}`); }
+}
+checkLive("XX.X with both ends free is live", ["H8", "H9", "H11"], [], true);
+checkLive("OXX.X is not an open three", ["H8", "I7", "K5"], ["G9"], false);
+
 console.log(`\n  ${fail === 0 ? "all split shapes visible" : `${fail} failure(s) — humans will still walk through this`}`);
 process.exit(fail ? 1 : 0);

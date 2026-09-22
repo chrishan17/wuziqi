@@ -434,7 +434,7 @@
 
 /* `.demo-pt`'s grid lines are ::before/::after, and ::after paints AFTER child
    elements — so the vertical line draws on top of the stones and overlays
-   unless every layer is declared. Same trap as the real board (see CLAUDE.md).
+   unless every layer is declared. Same trap as the real board (see AGENTS.md).
    Layers here: lines 0, heat wash 1, stone 2. */
 .mini .demo-pt::before,
 .mini .demo-pt::after,

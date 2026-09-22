@@ -43,6 +43,10 @@ const m21 = match(2, 1);
 expect("L2 beats L1", m21.aw >= 15, `L2 ${m21.aw} - ${m21.bw} L1 (draws ${m21.d})`);
 const m20 = match(2, 0);
 expect("L2 beats L0", m20.aw >= 19, `L2 ${m20.aw} - ${m20.bw} L0 (draws ${m20.d})`);
+// L3 is the ruler Jev is actually measured against; scripts/test-l3.ts checks
+// its tactics and both seats. Here it only has to keep the ladder monotone.
+const m32 = match(3, 2);
+expect("L3 beats L2", m32.aw >= 16, `L3 ${m32.aw} - ${m32.bw} L2 (draws ${m32.d})`);
 
 // handicap placement sanity
 for (const n of [1, 2, 3, 4]) {

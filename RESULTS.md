@@ -577,3 +577,604 @@ negative results so they are not re-tried blind.
 The honest position: the straight-line habit is real and measurable, both obvious levers were
 tried and both made Jev *worse* against the only ruler available, and L2 may simply not punish a
 straight line the way a human does — in which case the metric to optimise is not one L2 can score.
+
+## L3 — a ruler that is not already saturated (2026-09-21)
+
+Every candidate improvement to the black request was being measured against L2, where black is
+already **8-0 at even**. A saturated baseline can only detect harm, and that is exactly how the two
+previous candidates were rejected (`builds_on` 6-2, `PRIORITY_SHAPE` 7-1). So the first piece of
+work on "raise black's win rate" is not a state change — it is a stronger opponent.
+
+`lib/opponent.ts` gains **L3**, still pure TypeScript, still never consulting Jev. Three additions
+over L2's one ply of greed:
+
+1. **VCF** — win by continuous fours, depth 8, node budget 400. Each step forces a unique reply, so
+   the tree is narrow.
+2. **双威胁** — `winsSoon` counts 四三 / 双三 through `countFours` / `countOpenThrees` from
+   `lib/renju.ts`, whose recursive definitions were already tested there.
+3. **一步否决** — a candidate is rejected if the opponent wins soon after it.
+
+### Result — `npx tsx scripts/test-l3.ts 20`
+
+| | vs L2 |
+| --- | --- |
+| L3 as black | 20-0 |
+| L3 as white | 19-1 |
+
+40 games in 6.8s, ~10ms per ply. For reference the seat advantage is real: L2-black beats L2-white
+6/8, and L3-black beats L3-white 5/8. **L3 as white — the seat it will hold against Jev-as-black —
+goes from L2's 2/8 to 19/20.**
+
+### Two bugs found by playing it, both worth remembering
+
+**A plain four is not a win.** The first `winsSoon` asked "after this move, does the player have a
+five-completion point?" — which is true of every four, and a four is simply blocked. Every reply on
+the board came back as winning, the defence saw no difference between them, and it played into the
+board corner. The fix is `vcfAfter`, which judges a move as the FIRST forcing stone rather than
+inspecting the resulting position: no completion → not forcing; one → the opponent blocks and the
+search continues; two → an open four, and only then a win.
+
+**A veto that cannot add a candidate is not a defence.** The first version filtered the mover's own
+top 8 by static score. The saving move is frequently a point that scores near zero for the defender,
+because `scorePoint`'s `denied` term is a MAX over the opponent's lines — blocking one of two threes
+lowers that max by nothing. Measured: L3-as-white lost a game by never examining F7, which was
+black's open four. Fixed by generating the opponent's key points explicitly (`winningReplies`) and
+defending among *those*.
+
+A follow-up to the same fix: the key-point generator first took the opponent's top 8 by static
+score, and those scores **tie constantly** — every point completing any open three scores the same —
+so the slice dropped the key point whenever more than eight tied. It now generates from geometry
+instead: every point that makes a four (exact, from a single window scan), plus every point that is
+a critical point of two threats in **different directions**, which is where a double threat has to
+sit.
+
+### Remaining — audited, not assumed
+
+Both losses were replayed, counting `winningReplies(black)` before and after every white move:
+
+```
+game 19   ply 1-15   danger before 0-1, after 0     white answers everything
+          ply 17     before 2  after 0
+          ply 19     before 4  after 2              one stone can no longer remove them all
+game  5   ply 17     before 5  after 2
+```
+
+So white is not missing a warning it was given: the danger count is driven to 0 every ply until
+black plays a move that leaves **more winning replies than one stone can remove**. Catching that
+needs to look one black move further ahead — the move that *creates* the double double is not
+itself a four, a double threat, or a VCF start, so none of L3's three detectors fire on it.
+Diminishing returns for a ruler; noted rather than fixed.
+
+### Seat baseline, for reading future runs
+
+L3 vs L3 at even: **black wins 5/8**. The first-move advantage is in the ruler too, so a future
+Jev-as-white run against L3-black should be read against roughly 3/8, not against 50%.
+`ladder.ts` hardcodes `JEV = 2`, so that is the seat it will report.
+
+`scripts/colour-check.ts` runs the shipped black arm plus whichever candidate arms are enabled in
+`ARMS` (currently `black+verify`; `black+shape` is commented out rather than deleted, because its
+rejection was read off the saturated L2 baseline). Arms are seeded by colour, not by arm, so every
+arm faces identical games — read the results paired.
+
+`npm run colour` now defaults to L3 (`JEV_LEVEL=2` reproduces the old runs).
+
+### First read: Jev-as-black vs L3 — the baseline is no longer saturated
+
+`npx tsx --env-file-if-exists=.env.local scripts/colour-check.ts 3`, shipped arm
+(`PRIORITY_INITIATIVE`), even, native transport:
+
+| opponent | result | avg plies |
+| --- | --- | --- |
+| L2 (8 games, earlier run) | 8-0 | 18.3 |
+| **L3 (3 games)** | **2-1** | **29.0** |
+
+| phase | n | top1 | entropy | connected | clusters | makes | 1-line |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| opening 1-4 | 12 | 0.658 | 0.188 | 50% | 1.00 | 2.25 | 1.00 |
+| middle 5-9 | 15 | 0.518 | 0.312 | 53% | 1.73 | 2.20 | 0.60 |
+| late 10+ | 19 | 0.542 | 0.298 | 100% | 1.42 | 3.68 | 0.36 |
+
+n is 3 games — this is a smoke test, not a strength claim. What it establishes is the thing the
+ruler was built for: **there is now room above and below the current number.** The midgame is where
+it looks worst (top1 0.518, entropy 0.312, connected 53%, clusters 1.73) — Jev gets blocked, has to
+re-plan, and scatters, which the 17-ply races against L2 never tested.
+
+Note also `1-line` falls 1.00 → 0.60 → 0.36 under real resistance, where against L2 it stayed at
+0.61 in the midgame. The 開盤直線 complaint may read differently against a ruler that punishes it,
+and `PRIORITY_SHAPE`'s rejection was read off the saturated baseline — it is commented out in
+`ARMS`, ready to re-run rather than deleted.
+
+
+## 第二轮验证 — built, measured, NOT shipped (2026-09-21)
+
+The 大师 loop from AGENTS.md, implemented at last: `nakedJevMove({ verify: true })` takes round
+one's top 3 and issues **one request per candidate** against the board as it would stand after that
+move, asking two `noul` questions — `unanswerable` ("do I now have a threat they cannot fully
+answer?") and `refuted` ("do they now have a forcing win?"). Policy in code:
+`score = p1 + VERIFY_ALPHA * (unanswerable - refuted)`, gated off when round one is already ≥0.9
+sure. See AGENTS.md for the mechanism and the reasons it is one request per candidate.
+
+### A/B, Jev black vs L3, 12 games per arm, identical seeds
+
+| arm | result | avg plies |
+| --- | --- | --- |
+| `black+atk` (shipped) | **8-4** | 32.5 |
+| `black+verify` | 7-5 | 34.8 |
+
+Seeded by colour, so both arms played the same twelve games. Paired:
+
+```
+atk:     W W W W L L L W L W W W
+verify:  W L W W W L W L L L W W
+```
+
+Seven games agree. Of the five that differ, verify won 2 and lost 3. **That is the whole effect
+size** — and it is a coin flip.
+
+| phase | arm | connected | clusters | makes |
+| --- | --- | --- | --- | --- |
+| middle 5-9 | atk | 61% | 1.39 | 2.32 |
+| middle 5-9 | verify | 67% | 1.40 | 2.45 |
+| late 10+ | atk | 88% | 1.34 | 3.29 |
+| late 10+ | verify | 90% | 1.52 | 3.18 |
+
+`top1` and `entropy` are deliberately **left out of that comparison**: both are read off round one's
+distribution, which round two never touches, so any difference between the arms is a different
+trajectory rather than an effect of the feature. Only the columns that depend on the move actually
+played can say anything.
+
+The second pass ran on 192/218 moves (88%) and switched Jev off round one **17** times. The honest
+reading is **no measured gain**, so `app/api/move/route.ts` is unchanged and the UI does not use it.
+
+### Why — the calibration, which the scoreboard cannot show
+
+A feature that only acts on 9% of moves cannot be evaluated by a 12-game record.
+`scripts/test-verify.ts` instead ground-truths every candidate the pass looked at against L3's own
+tactics: is Jev still holding a winning point after white's best reply? does white hold one?
+
+8 games, 216 candidate judgments (`npx tsx --env-file-if-exists=.env.local scripts/test-verify.ts 8`,
+Jev 5-3 in that run):
+
+| question | P(said) when TRUE | when FALSE | separation |
+| --- | --- | --- | --- |
+| `unanswerable` | 0.711 (n=54) | 0.471 (n=162) | **+0.240** |
+| `refuted` | 0.386 (n=26) | 0.216 (n=190) | +0.170 |
+
+An earlier 4-game read (n=132) gave +0.266 and +0.108 — `unanswerable` is stable, `refuted` moved a
+lot between runs, which is itself the point about how thin its evidence is.
+
+Switches across the 8 games: 10 — **1 better, 2 worse, 7 neutral**.
+
+So the mechanism is sound and both questions carry some signal, but:
+
+1. **`unanswerable` separates roughly 1.5x better than `refuted`, and they carry equal weight.**
+   Half the policy term is the weaker half, with full authority over round one.
+2. **The pass confirms rather than corrects.** 7 of 10 switches were neutral by the proxy and the
+   remaining three were a wash (1 better, 2 worse). That is the same story the 8-4 / 7-5 scoreboard
+   tells, arrived at independently and on 20x the sample.
+
+### The pre-registered next step, so it is not tuning on the test set
+
+Weight the two terms by their measured separation (`unanswerable` ~0.5, `refuted` ~0.35) and re-run.
+**Fit on the seeds `test-verify.ts` already used (5000+), evaluate on the `colour-check` seeds
+(9000+), and report both.** Alternatively `refuted` is a question code can answer deterministically
+— `winningReplies` in `lib/opponent.ts` already does — but handing it to code moves the Layer 1/2
+boundary and is the 入门/標準 difficulty dial, not a free win. That is a product decision, not a
+tuning one.
+
+
+## 篩選五個候選 — decision rule, written before the results were read (2026-09-21)
+
+Five arms against L3, 12 games each, all on the same seeds (9000+), so every arm plays identical
+games and the comparison is paired:
+
+| arm | what it changes |
+| --- | --- |
+| `black+atk` | control — shipped ladder, nothing added |
+| `black+verify2` | round two, terms weighted by measured separation (0.5 / 0.35) instead of equally |
+| `black+dual` | `double_threat` in `point_effects` — 四三 / 双三 as one field |
+| `black+open` | `stone_relations` — the opening's cross-colour geometry |
+| `black+shape` | `PRIORITY_SHAPE`, re-run against a ruler that is not saturated |
+
+### Why the rule is written down first
+
+Control sits at 8-4, so per-arm SD is about 1.6 games. **The best of five arms will land 1.5-2 games
+above the mean by chance alone**, and whatever wins a screen regresses on re-measurement. Picking
+the winner and shipping it is how this project would manufacture a result instead of finding one.
+
+So, fixed in advance:
+
+1. **Screen statistic** is the paired discordant net over the 12 shared games — of the games where
+   the arm and the control disagree, wins minus losses. A raw record is not enough; the seven games
+   both arms win carry no information.
+2. **A candidate must reach net ≥ +3** to go forward. Anything less is inside the noise.
+3. **Confirmation on fresh seeds** (`SEED_BASE=12000`), 24 games, control included. 9000+ is now
+   spent on the screen and 5000+ on fitting `verify2`'s weights; re-using either would be scoring
+   the fit on its own training set.
+4. **Ship only if** the confirmation net is ≥ +4, or the combined 36-game paired net is ≥ +6.
+5. **If nothing clears, nothing ships**, and the deployment carries no behaviour change. Saying that
+   is the result; quietly deploying an unmeasured arm is not.
+6. A winner is wired for **`jev === 1` only**. Every number here is the black seat; applying it to
+   white unmeasured is the exact pattern the rest of this file exists to prevent.
+
+
+### Screen result — nothing cleared, and why (seeds 9000+, 12 games each)
+
+| arm | record | discordant | won | lost | paired net |
+| --- | --- | --- | --- | --- | --- |
+| `black+atk` (control) | 7-5 | — | — | — | — |
+| `black+verify2` | 6-6 | 5 | 2 | 3 | **-1** |
+| `black+dual` | 7-5 | 4 | 2 | 2 | **0** |
+| `black+open` | **9-3** | 4 | 3 | 1 | **+2** |
+| `black+shape` | 6-6 | 1 | 0 | 1 | **-1** |
+
+`black+open`'s 9-3 is exactly the winner's-curse case the rule was written for: it differs from the
+control on only **four** games. The mechanism check settles it — `scripts/test-opening.ts` asks Jev
+for its second move with and without the field across 8 openings and it **changed the move in 1 of
+8**. A field that moves one opening in eight cannot produce a 9-3. Nothing goes to confirmation.
+
+Reweighting `verify2` by measured separation did not rescue the second pass either: equal weights
+gave 7-5, measured weights 6-6, control 8-4 and 7-5 on two different seed sets. It stays off.
+
+### Why they all failed, and the measurement that found the real gap
+
+Every one of those candidates is a **tiny intervention**: `dual` fires on ~1 point per game, `open`
+on 1 opening in 8, `verify2` switches 12 moves in 153. None of them can move a 12-game record
+because none of them changes much. So instead of screening more of them, ask what is actually
+losing the games.
+
+`scripts/test-forced.ts` works out, independently and before Jev is asked, what each position
+demands, then checks what Jev played. 8 games, Jev 5-3:
+
+| the position demanded | arose | missed | |
+| --- | --- | --- | --- |
+| `win_now` — Jev can make five | 5 | 0 | **0%** |
+| `must_block` — opponent completes five next move | 12 | 2 | 17% |
+| `must_answer` — opponent wins soon, and a defusing move exists | 31 | 20 | **65%** |
+
+**Jev never misses a five. It misses the move that defuses the opponent's coming double threat two
+times out of three, and that situation arises four times per game.** That is where black's losses
+are, and it is not a subtlety of judgment.
+
+It is also, once again, the encoding. `blocks_black` / `blocks_white` in `lib/effects.ts` are built
+from the critical points of threats that ALREADY exist. A point from which the opponent would
+CREATE a 四三 / 双三 carries no field at all — on the test board for `white_would_make`, the control
+`point_effects` has **zero entries**, so the losing square is indistinguishable from any other empty
+point. Fourth instance of this project's recurring bug.
+
+### Primary test: `black+key` (seeds 12000+, 24 games)
+
+`<colour>_would_make` states what the OPPONENT would make by playing a point, and only when that is
+two or more threats of severity three-or-better. Narrow by construction, and aimed at the 65%.
+
+This is a **new hypothesis from a diagnostic, not the screen's winner**, so the screen contributes
+no evidence to it and the seeds are fresh. Pre-registered ship threshold, unchanged from above:
+**paired net ≥ +4 over 24 games.**
+
+
+### Primary test result — `black+key` is neutral, and the seed variance is the bigger news
+
+```
+atk:  W L L W L W W L W L L L L L L W L L L L L W L L   7-17
+key:  W L L L L W W L W L L L L W L L L L L L W W L L   7-17
+```
+
+Discordant 4, won 2, lost 2, **net 0**. Threshold was +4. It does not clear.
+
+**Control went 8-4 and 7-5 on seeds 9100+ and 7-17 on seeds 12100+.** The seed blocks are not
+degenerate — white's first reply is 16 distinct points in one block and 15 in the other — so this is
+just how wide the variance is. Jev-as-black against L3 is somewhere near **14-36 (39%)** across all
+36 control games, not the 67% the first 12 suggested. Every 12-game number in this file, including
+the screen above, has error bars that wide.
+
+That also sets the budget for this kind of work: separating 39% from 55% at 80% power needs on the
+order of 170 games per arm. **No 12- or 24-game A/B can resolve the effect sizes these state fields
+produce**, which is the real reason the screen found nothing, and it is not fixed by running more
+arms.
+
+### What the field did do — measured on the mechanism instead
+
+`scripts/test-forced.ts 8 key` reruns the audit with the field on, same seeds:
+
+| the position demanded | off: arose / missed | on: arose / missed |
+| --- | --- | --- |
+| `win_now` | 5 / 0 — 0% | 5 / 0 — 0% |
+| `must_block` | 12 / 2 — 17% | 25 / 1 — **4%** |
+| `must_answer` | 31 / 20 — **65%** | 43 / 24 — **56%** |
+
+Both rates improve and neither is a clean comparison: the games diverge, so the denominators are
+different positions. Read it as "not harmful, possibly slightly better", which is all 8 games can
+support — and it is consistent with the scoreboard's net 0.
+
+### Where this leaves black's win rate
+
+The state-side route is exhausted at the effect sizes that are measurable here. Five candidates,
+one diagnostic and roughly 150 games say the same thing: **Jev sees the position and still fails to
+answer the opponent's coming double threat in over half of the positions where that is the move.**
+Adding the fact to the state did not convert it into the move.
+
+The lever that certainly works is the Layer 0/1 boundary — code enforcing the forced moves it can
+already detect. It is not a tuning question: it is the difficulty dial this project is built around,
+and spending it is a product decision.
+
+
+## SHIPPED — `double_threat`, +8.2pp for black, 680 games (2026-09-21)
+
+The state field that survived. `point_effects` collapses each point to its single strongest shape,
+so a move making a four AND an open three reads exactly like a plain four. `double_threat` states
+both, and only when there are two or more of severity three-or-better.
+
+`scripts/ab.ts` — games in a worker pool, every game appended to `runs/ab-*.jsonl`, API failures
+counted as `error` and dropped from both arms rather than scored as losses.
+
+| run | control | dual | paired | McNemar |
+| --- | --- | --- | --- | --- |
+| seeds 30000+, 170 games | 62-108 (36.5%) | 81-89 (47.6%) | won 40 lost 21, **net +19** | p = 0.021 |
+| seeds 40000+, 170 games | 85-85 (50.0%) | 94-76 (55.3%) | won 34 lost 25, **net +9** | p = 0.298 |
+| **pooled, 680 games** | **147-193 (43.2%)** | **175-165 (51.5%)** | **won 74 lost 46, net +28** | **p = 0.014** |
+
+**Read this honestly.** The replication reproduced the DIRECTION but not the size: +11.1pp became
++5.3pp and, on its own, was not significant. That is textbook regression after selecting a winner
+from three arms. The believable estimate is the pooled **+8.2pp**, and the true effect is more
+likely near the replication's +5 than the discovery run's +11.
+
+Note also that the control scored 36.5% on one seed block and 50.0% on the next. **Only the paired
+column means anything here**; any absolute win rate in this file that came from fewer than ~100
+games should be read as decoration.
+
+### The two candidates that did not make it
+
+- `key` (`<colour>_would_make` — the points the OPPONENT turns into a double threat) went +8 paired
+  over 170 games, p = 0.37. Noise. This one is worth flagging because the argument for it was the
+  strongest in the whole session: it came from a measured failure (65% of `must_answer` positions
+  missed), it was aimed precisely at that failure, and the state demonstrably could not express the
+  fact before. **It still did not work.** A good mechanism story is not evidence.
+- `open`, `verify2`, `shape`: screened at net +2, -1, -1 over 12 games and never re-tested.
+
+### What the 12-game screen got wrong
+
+`dual` screened at **net 0** and was nearly dropped; `open` screened at 9-3 and led the table on
+pure luck (it changes Jev's move in 1 opening out of 8). A 12-game screen against a ~43% baseline
+does not rank candidates — it shuffles them. Every 12-game A/B in this file predates that lesson.
+
+### Still open
+
+- Measured for **black only**. Enabled for both seats on request (2026-09-22): white is unmeasured.
+  The field is computed for the seat Jev holds, so as white it describes white's own shapes.
+- The `must_answer` miss rate (56-65%) is still the largest known gap and nothing has moved it.
+  The Layer 0 backstop remains the one lever known to work on it, and remains unspent.
+
+
+## Cost of this campaign — it took production down
+
+~1,050 games, ~16.7k requests, ~57M input tokens, about **$2.39** at the quoted rate. That
+exhausted the organisation's TypeSafe credits, and since the scripts, `npm run dev` and the
+deployed app all read the same `TYPESAFE_API_KEY`, **production now returns
+`TypeSafe API 402: billing_error` on every move**. The deploy itself is fine — the page serves, the
+route is correct, no key is in the client bundle — it simply has no credits to spend.
+
+Budget the next one: ~3.4k input tokens per move, ~16 Jev moves per game, so **a 170-game arm is
+~9.3M tokens** and a three-arm run is ~28M. Check the balance first at
+https://console.typesafe.ai/settings/billing.
+
+
+## 执黑开盘经验 — told to Jev, 10 games vs L3, not shipped (2026-09-22)
+
+详注执黑的前四手几乎总在一条直线上。开盘时 `lines_on_board` 和 `point_effects` 是空的，真正起作用的是优先级第 7 条「延长自己最长的线」。`PRIORITY_SHAPE` 把这条改成「走宽度」并且整局都用，后盘变差，所以没有再整局替换。这次只在黑棋已有子数少于 4 时换上 `PRIORITY_OPENING`：第一子天元，第二子不要落在自己和最近白子的连线上，已有的子若在一条线上就换方向，开局不要去挡还不是四或活三的白子。第 1–6 条（成五、挡五、做四、挡四、做活三、挡活三）不动。详注对照是 `PRIORITY_INITIATIVE` + `doubleThreat`，和页面一致。
+
+`npx tsx --env-file-if-exists=.env.local scripts/test-opening-l3.ts`。L3，偶数，自由规则，种子 12000–12004，每种子两臂，共 10 盘。
+
+| seed | 详注 | 手数 | 前四手 | 1-line | 执黑 | 手数 | 前四手 | 1-line |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 12000 | W | 25 | H8 H9 H6 H7 | 1.00 | W | 27 | H8 H9 I10 H6 | 0.75 |
+| 12001 | W | 23 | H8 I8 K8 J8 | 1.00 | W | 23 | H8 I8 K8 J8 | 1.00 |
+| 12002 | W | 23 | H8 I8 K8 J8 | 1.00 | W | 23 | H8 I8 K8 J8 | 1.00 |
+| 12003 | L | 30 | H8 H9 H6 H7 | 1.00 | L | 30 | H8 H9 H6 H7 | 1.00 |
+| 12004 | W | 19 | H8 I8 K8 J8 | 1.00 | W | 23 | H8 H7 H10 H9 | 1.00 |
+
+两臂都是 4-1。配对：执黑更好 0，详注更好 0，同胜负 5。前四手有变化的是 2/5，第四子离开那条线的是 1/5。
+
+原因在梯子的顺序，不在措辞没写到。两子相邻之后，沿这条线延长常常已经是活三，而「做活三」是第 5 条，排在开盘经验前面。所以经验只在还做不出活三时才被看见；一旦能沿唯一的线做成活三，线就被补回去了。12001 和 12002 两臂棋谱相同，就是这个。
+
+没有接到页面上。10 盘里胜率没有动。把斜向分叉排到做活三前面的结果见下一节。
+
+
+## 斜向分叉排到做活三前面 — 10 games vs L3, not shipped (2026-09-22)
+
+棋谱里的说法是斜活二比直活二更难被一子防住。上一节的开盘文字排在「做活三」后面，沿直线延长往往已经是活三，所以没生效。这次两处一起改，仍然只在黑棋不足四子时：
+
+- 状态里加 `opening`：列出离开直线的斜向邻点，和只把直线加长的点。已经走成斜线的，这个字段不再出现。
+- `PRIORITY_DIAGONAL` 把「走 `diagonal_off_that_line` 里的点」放在做活三前面。成五、挡五、做四、挡活四仍在更前面。四子之后回到 `PRIORITY_INITIATIVE`。
+
+`npx tsx --env-file-if-exists=.env.local scripts/test-diagonal.ts`。L3，种子 13000–13004，每种子两遍，共 10 盘。详注仍是页面上的优先级加 `double_threat`。
+
+| seed | 详注 | 手数 | 前四手 | 1-line | 斜向 | 手数 | 前四手 | 1-line |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 13000 | W | 21 | H8 I8 F8 G8 | 1.00 | L | 14 | H8 G7 I8 H6 | 0.50 |
+| 13001 | W | 35 | H8 H7 H10 H9 | 1.00 | L | 22 | H8 G7 J10 I9 | 1.00 |
+| 13002 | W | 21 | H8 G8 J8 I8 | 1.00 | W | 17 | H8 G7 J10 I9 | 1.00 |
+| 13003 | W | 23 | H8 I8 K8 J8 | 1.00 | L | 14 | H8 G7 F6 I9 | 1.00 |
+| 13004 | W | 23 | H8 I8 K8 J8 | 1.00 | L | 24 | H8 G7 H7 E10 | 0.50 |
+
+详注 5 胜。斜向 1 胜 4 负。配对：斜向更好 0，详注更好 4，同胜负 1。五盘开局都变了，第二子都是 G7，也就是天元的斜邻。其中三盘接着把这条斜线走成一条（H8 G7 J10 I9、H8 G7 F6 I9），因为两子一旦在斜线上，`opening` 就不再列出分叉，做活三又把斜线补长。第四子离开单线的只有 2 盘，这两盘都输了。
+
+没有接到页面上。斜着起手换掉了直线，对 L3 的胜负变差。
+
+## 整局偏向斜线 — 10 games vs L3, not shipped (2026-09-22)
+
+上一节只盖住前四手，而且两子一旦在斜线上，分叉字段就消失，做活三把那条斜线补长。这次三处都按整局来改，成五、挡五、做四、挡活四不动：
+
+- `point_effects` 里每个形状写上方向。同级时斜向排在横竖前面。
+- `diagonal_branches` 只列「从横线或竖线向外的斜邻」，也就是 `point_effects` 因为不到三而丢掉的那些点。肩上的正交邻点不列。已经有两子同在一条斜线上、或者已经能做四，这个字段就不出现。
+- `PRIORITY_LEAN` 整局都用：字段还在时，走斜向分叉，即使直线延长已经是活三；字段消失之后，有斜向活三就走斜向活三，否则延长斜线。
+
+`npx tsx --env-file-if-exists=.env.local scripts/test-lean.ts`。L3，种子 14000–14004，每种子两遍，共 10 盘。详注仍是页面上的优先级加 `double_threat`。
+
+| seed | 详注 | 手数 | 前四手 | 斜向 | 手数 | 前四手 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 14000 | W | 23 | H8 H7 H10 H9 | L | 32 | H8 H7 G9 G5 |
+| 14001 | L | 48 | H8 H9 I8 J8 | L | 54 | H8 I9 F6 G7 |
+| 14002 | W | 27 | H8 G8 J8 I8 | W | 35 | H8 G8 I7 I5 |
+| 14003 | L | 14 | H8 G8 J8 I8 | L | 22 | H8 G8 I7 H10 |
+| 14004 | L | 30 | H8 H9 H6 H7 | L | 10 | H8 H9 G7 I9 |
+
+详注 2 胜 3 负。斜向 1 胜 4 负。配对：斜向更好 0，详注更好 1，同胜负 4。第二子多半还在直线上，因为只有一子时分叉列表是空的。第三子走出去（G9、I7、G7），第四子又去补斜线。14004 走到 H8 H9 G7 I9，10 手输了。
+
+没有接到页面上。整局改完，唯一变了胜负的那一盘是斜向输的。这一版把斜向分叉排在活三前面，所以被拿掉了。
+
+详注随后改成活三仍在斜向分叉前面（`PRIORITY_LEAN` / `PRIORITY_LEAN_WHITE`，`leanDiagonal`）。有好几处活三时走斜向的那一处；做不出活三时才走 `diagonal_branches`。方向写在 `point_effects` 的句子里。这是要求改的，不是上面这 10 盘测出来的。
+
+
+
+## 两处编码错误和一把坏尺子 — 离线审计真人对局 (2026-09-23)
+
+不调用 Jev。把 `runs/ui-*.jsonl` 里约 33 盘、236 手的真人对局逐手重建，用代码判断局面要求什么。
+
+### 尺子：`test-forced.ts` 把反杀算成漏着
+
+`must_answer` 只认"下在解围点上"。Jev 自己走出活四、四三或 VCF 起手也是正解，却被记成漏着。真人对局里：
+
+| | 漏着 |
+| --- | --- |
+| 旧口径 | 12/25 (48%) |
+| **修正后** | **5/25 (20%)**，另有 7 手是 Jev 自己的必胜反击（5 手活四） |
+
+上面对 L3 测出的 65% / 56% 用的是同一个旧口径，**应视为高估**。A/B 日志只存胜负、没存棋步，无法离线重算。
+`scripts/test-forced.ts` 已改：反杀单独计为 `countered`，不再算作漏着。
+
+### `double_threat` 把眠三算成威胁
+
+判断条件是"三或以上"，没区分活三和眠三，于是两个眠三也被标成四三/双三，并在排序里加 45 分、排到真正的冲四前面。
+真人日志里 131 个标签有 70 个是这种。ply 24 那手 G9（55%，正解 K13）就是被这个假标签带走的。
+修正后只数冲四和活三：61 个标签，除两处"成五+活三"外全部与 `lib/renju.ts` 的 `countFours + countOpenThrees >= 2` 一致，没有漏标。
+`<colour>_would_make` 同样的问题，一并修正。**+8.2pp 是在旧定义上测的，新定义未测。**
+
+### `game` 字段自相矛盾
+
+`buildState` 的 `game` 固定写 "free-style rules, no forbidden moves"，开了禁手也不变，和 `win_condition` 矛盾。已改为随规则变化。
+
+### 20 盘对照：修正版没有更好 (2026-09-23)
+
+Jev 执黑 vs L3，页面上的配置（`PRIORITY_LEAN` + `leanDiagonal` + `double_threat`），种子 50000–50019，两臂同种子。
+旧定义用 `JEV_LEGACY_DOUBLE_THREAT=1` 复现。`ARMS=ship scripts/ab.ts 20 5`。
+
+```
+修正版  WWWLWWLLLLLWLWLLLLWW   9-11
+旧定义  WWWLWWLLLLWWLWLWWWWW  13-7
+```
+
+不一致 4 盘，全是旧定义赢。精确 McNemar p = 0.125，不显著；20 盘本来就分辨不了这种幅度。
+但方向和预期相反：假标签（两个眠三）可能在起作用——它把"同时在两条线上成三"的点排到前面，
+相当于一个更窄的 `builds_on`。**修正版不上线，等 170 盘。** 这是事实准确性和胜率第一次方向冲突。
+
+### 复查、再修、再跑 20 盘 (2026-09-23)
+
+复查 state 又发现两处和棋盘不符，一并修掉（三个臂都带着）：
+- `blocks_black` / `blocks_white` 不说被挡的三是活是眠。挡一个眠三和挡一个非挡不可的活三读起来一样。现在写 `open three …` / `blocked three …`，排序也是 四 > 活三 > 眠三。
+- `stones_on_board` 用的是 `history.length`，让子的子不在 history 里。改为数棋盘。
+
+`double_threat` 拆成三种模式（`DoubleThreatMode`）：`legacy` 旧定义；`fixed` 只数冲四和活三；`split` 在 `fixed` 之外，把"两条线上各成三但逼不出两手"的点标成 `shapes_on_two_lines`，排序和 `legacy` 完全一样——和 `legacy` 只差名字。
+`scripts/ab.ts` 现在把每盘的棋步和 Jev 每手的概率记进日志。
+
+种子 51000–51019，三臂同进程配对，基准 `legacy`：
+
+| 臂 | 战绩 | 平均手数 | 配对 vs legacy |
+| --- | --- | --- | --- |
+| legacy | 11-9 | 32.9 | — |
+| fixed | 11-9 | 30.8 | 赢 4 输 4，净 0 |
+| **split** | **15-5** | **28.8** | 赢 4 输 0，净 +4（精确 p = 0.125） |
+
+**用棋步复盘不一致的盘，分叉点有一大半和这个字段无关。** 51006 在第 2 手、51014 在第 4 手、51011 在第 8 手就分开了，分叉那一手两边都没有 `point_effects` 条目——
+那时唯一的差别是 `point_effects_note` 的措辞。也就是说，**state 里任何一句话变了，都会把势均力敌的点重新洗牌**，20 盘里的胜负差有相当部分是这种蝴蝶效应，不是机制。
+
+真正在分叉点上用到了这个字段的盘：
+- fixed 赢的 3 盘（51001、51007、51013）都是 fixed 下出了**真双三**，而 legacy 在同一局面选了"活三+眠三"的假标签点——假标签和真双威胁排序相同，把真的淹没了。
+- legacy 赢的 2 盘（51002、51017）是 legacy 下了"活三+眠三"点，fixed 去下别处。
+- split 的 4 盘净胜里只有 51013 用到了字段（真双三）。
+
+两轮合计（40 个种子）：fixed vs legacy 赢 4 输 8（两轮配置不同：第一轮没有 `blocks_*` 修正，note 也一样，只切了定义）；split vs legacy 只有这一轮，净 +4。**都不显著。** 能说的是：
+假标签确实会遮住真双威胁（复盘里看得到），而"活三+眠三"这种点本身可能也有价值——`split` 两者都保留且如实命名，是目前最好的候选。要定论需要 170 盘。
+
+页面（`route.ts`）改为显式传 `"split"`。生产环境未重新部署，仍是 `legacy`。
+
+
+## 20 盘 → 复盘输局 → 修 → 再 20 盘 (2026-09-23)
+
+`scripts/ab.ts` 现在记录棋步，每轮都用同一组种子 51000–51019，复盘输局找原因再改。
+
+### 第一轮：split 的 5 盘输局
+
+| 种子 | 原因 |
+| --- | --- |
+| 51007 / 51018 | 白棋在 K6 有潜在双三，state 里没有条目。Jev 先下了没用的冲四（G4 / H5），再挡错了点 |
+| 51010 | 白棋有四（B7 成五），I6 却被写成 "open four — **unstoppable**"，Jev 以 70% 下了 I6 |
+| 51012 / 51015 | 白棋更早就形成了双三，同属 K6 这一类 |
+
+修正：开放四的说法去掉结论，改为 "makes an open four (two points complete five)"；`blocks_*` 挡四时写明对方下一手在这里成五。
+测试打开修正后的 `<colour>_would_make`。
+
+`split` 13-7，`splitkey` 14-6，配对净 +1。注意 `split` 在同一组种子上上一轮是 15-5——同配置、同种子，一句措辞改动就差两盘，这就是 20 盘的噪音。
+
+### 第二轮：Jev 看见了事实，被指令压住了
+
+复盘 `splitkey` 的输局：输掉的那个点**带着** `white_would_make`（51001 里它是 `point_effects` 第一条），Jev 却去下了单冲四。
+`PRIORITY_LEAN` 第 3 条写着 "if you can make a four, play it… so you keep the initiative"，排在除成五/挡五外的一切之前。51017 连下了 7 个单冲四，对方的关键点一直空着。
+
+新梯子 `PRIORITY_KEY`：去掉无条件冲四；`double_threat` 含四时直接下（两个活三则只在对方没有活三和四时下）；`white_would_make` 的点排在挡活三之前；末尾说明单冲四会被一步挡住。
+
+| 臂 | 战绩 | 单冲四占比 | `white_would_make` 出现时下在该点 | `double_threat` 出现时下在该点 |
+| --- | --- | --- | --- | --- |
+| splitkey（`PRIORITY_LEAN`） | 13-7 | 32% | 6/40 (15%) | 12/27 |
+| **keyladder**（`PRIORITY_KEY`） | **15-5** | **22%** | **14/25 (56%)** | 15/23 |
+
+配对净 +2（赢 4 输 2）。胜负差在噪音范围内，但**行为变化是直接测到的**：同一个事实，被采纳的比例从 15% 到 56%。
+这是本项目里第一次指令明确推动了 Jev——不是加新指令，而是删掉一条和事实打架的指令。
+
+剩下 5 盘：51010 自己做活三而没挡对方活三（违反第 6 条）；51012 挡活三挡错了一端；51011 / 51015 是长局里的深层 VCF。
+
+页面（`route.ts`）执黑改为 `PRIORITY_KEY` + `keyPoints`；执白不变。未部署。
+
+
+## 第三轮：挡哪一端 — `leaves` (2026-09-23)
+
+`keyladder` 剩下的输局里，51012 挡活三挡了 J9 而不是 J13（J9 让白棋还能在 J14 做四三），51010 对跳三 `O.OO.` 没挡中间的 G6。
+state 里两个端点的条目**一模一样**。新增 `leaves`：挡住这个点之后，那条线还能给对方做出什么——"can still make a four at …"、
+"cannot make a four with one stone"、"can no longer make five"。是挡完之后棋盘的事实，和 `would_make` 同类，不点名走法。
+`PRIORITY_KEY_LEAVES` 第 6 条指向它。排序：挡四 > 挡活三（死线 > 不留四 > 留四，"留四"只在同一条线另有干净挡点时才降级）> 挡眠三。
+
+同种子 51000–51019，三次迭代：
+
+| 版本 | keyladder | keyleaves | 配对 | 挡法不等时下在干净挡点 |
+| --- | --- | --- | --- | --- |
+| v1 | 16-4 | 13-5-2和 | -3 | 53/55 vs 21/35 |
+| v2 挡眠三不再与挡活三同分 | 16-4 | 13-5-2和 | -3 | 41/42 vs 13/24 |
+| **v3 `leaves` 只写在活三上** | 12-7-1和 | **15-4-1和** | **+3** | **30/32 vs 20/31** |
+
+每一版的问题都是从输局复盘里找到的：
+- v1：杀死一个眠三和杀死一个活三同分（27），51006 / 51010 / 51016 都是去挡了无关紧要的眠三，把对方的活三放着。
+- v2：眠三上也写 `leaves`，"this line can no longer make five" 这句话本身成了诱饵，51003 里 Jev 为它放弃了对方的 `white_would_make` 点。
+- v3：剩下的 51002 / 51003 是对方已经同时有两个活三。
+
+和棋是满盘 225 手，出现在两臂里。**噪音提醒**：keyladder 在同一组种子上四次分别是 15-5、16-4、16-4、12-7——同一配置±2 盘。
+胜负只能当方向看；站得住的是行为指标：挡法不等时选对挡点，从约 60% 到约 95%。
+
+页面执黑改为 `PRIORITY_KEY_LEAVES` + `blockLeaves`。未部署。
+
+
+## 第四轮：`white_would_make` 为什么没被采纳 — 移除眠三挡点 (2026-09-23)
+
+上一轮说 `white_would_make` 出现时只有约 65% 被采纳，**这个数低估了**：分类器没把 Jev 自己的活四、冲四反击算作安全。
+修正后（两次运行共 87 个局面）：下在该点 59，改下别处但安全 19，**真正的漏着 9**——其中 4 个是去挡一个眠三（51003 F12、51012 N10、51016 J8、51017 M12），3 个是对方同时还有活三（基本已输），2 个是单冲四。
+
+眠三最多只能变成一个冲四，一步就挡住；梯子里没有一条让 Jev 去挡眠三；它若是真双威胁的一半，`white_would_make` 已经点名。
+所以这一轮是**移除**：`dropBlockedThreeBlocks` 不再给眠三写 `blocks_*`。
+
+| 臂 | 战绩 | would_make 在场时真正漏着 | 其中去挡眠三 | 下在该点 |
+| --- | --- | --- | --- | --- |
+| keyleaves | 14-6 | 5 | 1 | 19 |
+| nobb | 13-7 | 3 | 0 | 27 |
+
+配对净 -1，噪音以内；行为往预期方向走，state 更短。采用。
+
+剩下的输局：单冲四后才想起对方关键点（51006 G9、51004 L11）；对方的连续冲四（51008 E11、51011 N6，这些点在 state 里没有条目）。
+后者要让 state 说"对方从这里能连续冲四到五"，那等于在 state 里放了一个 VCF 搜索的结果，和 `winningReplies` 是同一类计算——**这越过了"只陈述棋形事实"的边界，没有做**。
