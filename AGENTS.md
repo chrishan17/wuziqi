@@ -451,9 +451,16 @@ npx vercel deploy --prod   # production
 
 Production env: `JEV_TRANSPORT=native`, `TYPESAFE_API_KEY`, plus `AI_GATEWAY_API_KEY` staged for
 the gateway switch (see the free-tier note under transports). `.vercelignore` excludes
-`.env.local`, `runs/`, `scripts/`, `.claude/`, `.vercel/` — the project is not a git repo, so the
-CLI uploads the directory as-is and that file is the only thing standing between the key and the
-build. Verified with a clean-room build from a copy with those paths stripped.
+`.env.local`, `runs/`, `scripts/`, `.claude/`, `.vercel/` — `vercel deploy` uploads the working
+directory as-is (it is not wired to git), so that file is the only thing standing between the key
+and the build. Verified with a clean-room build from a copy with those paths stripped.
+
+Source is **public** at https://github.com/chrishan17/wuziqi (created 2026-09-23). `.gitignore`
+covers `.env*` and `runs/`; `.env.example` is force-added and holds no values. Before any push,
+grep the diff for the key — the history was scanned clean when the repo went public.
+
+**`npm run build` breaks a running `npm run dev`** — both write `.next`, and the dev server starts
+returning 500 with 404 assets. Stop dev, `rm -rf .next`, restart it after building.
 
 **Vercel's filesystem is read-only**, so `logMove()` in `app/api/move/route.ts` no-ops when
 `process.env.VERCEL` is set. UI game logs only exist locally.
