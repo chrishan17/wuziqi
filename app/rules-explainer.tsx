@@ -1,6 +1,7 @@
 "use client";
 
 import type { ForbiddenKind } from "@/lib/renju";
+import type { Lang } from "@/lib/i18n";
 
 /**
  * Small static diagrams. Each is a 7-wide strip or 7x7 grid where:
@@ -9,11 +10,14 @@ import type { ForbiddenKind } from "@/lib/renju";
  * Drawn with the same wood/ink vocabulary as the real board.
  */
 
-type Demo = { title: string; grid: string[]; caption: string };
+type Demo = { title: string; grid: string[]; caption: string; titleEn: string; captionEn: string };
 
 const DEMOS: Record<ForbiddenKind, Demo> = {
   doubleThree: {
     title: "三三 · 同时形成两个活三",
+    titleEn: "Double three · two open threes at once",
+    captionEn:
+      "After the cinnabar stone, the row and the column each hold an open three (both ends empty, one stone from an open four). Black loses on this move.",
     grid: [
       ".......",
       "...X...",
@@ -28,6 +32,9 @@ const DEMOS: Record<ForbiddenKind, Demo> = {
   },
   doubleFour: {
     title: "四四 · 同时形成两个四",
+    titleEn: "Double four · two fours at once",
+    captionEn:
+      "After the cinnabar stone, the row and the column are each a four — one stone from five. Black loses on this move. A four plus an open three (4-3) is legal: that is Renju's winning shape.",
     grid: [
       "...X...",
       "...X...",
@@ -42,6 +49,9 @@ const DEMOS: Record<ForbiddenKind, Demo> = {
   },
   overline: {
     title: "长连 · 六子以上连成一线",
+    titleEn: "Overline · six or more in a row",
+    captionEn:
+      "After the cinnabar stone, black has six in a row. Black wins only with exactly five; six or more loses. White has no such limit.",
     grid: [
       ".......",
       ".......",
@@ -79,20 +89,25 @@ function Diagram({ grid }: { grid: string[] }) {
   );
 }
 
-export function RulesExplainer({ kind }: { kind: ForbiddenKind }) {
+export function RulesExplainer({ kind, lang = "en" }: { kind: ForbiddenKind; lang?: Lang }) {
   const d = DEMOS[kind];
+  const zh = lang === "zh";
   return (
     <div className="explain">
-      <div className="explain-head">{d.title}</div>
+      <div className="explain-head">{zh ? d.title : d.titleEn}</div>
       <Diagram grid={d.grid} />
-      <p className="explain-legend">朱砂子＝正在落的这一手</p>
-      <p className="explain-body">{d.caption}</p>
+      <p className="explain-legend">{zh ? "朱砂子＝正在落的这一手" : "Cinnabar stone = the move being played"}</p>
+      <p className="explain-body">{zh ? d.caption : d.captionEn}</p>
     </div>
   );
 }
 
 /** 禁手 binds black, whoever is holding it — the text has to follow the seat. */
-export const FORBIDDEN_INTRO = (humanIsBlack: boolean) =>
-  humanIsBlack
-    ? "禁手只约束黑棋（你）。黑棋先行占优，禁手是用来抵消这个优势的；白棋（Jev）不受任何限制。踩中禁手立即判负。"
-    : "禁手只约束黑棋（Jev）。黑棋先行占优，禁手是用来抵消这个优势的；你执白，不受任何限制。Jev 踩中禁手即判负。";
+export const FORBIDDEN_INTRO = (humanIsBlack: boolean, lang: Lang = "en") =>
+  lang === "zh"
+    ? humanIsBlack
+      ? "禁手只约束黑棋（你）。黑棋先行占优，禁手是用来抵消这个优势的；白棋（Jev）不受任何限制。踩中禁手立即判负。"
+      : "禁手只约束黑棋（Jev）。黑棋先行占优，禁手是用来抵消这个优势的；你执白，不受任何限制。Jev 踩中禁手即判负。"
+    : humanIsBlack
+      ? "Forbidden moves bind black only — you. Moving first is an advantage, and these rules offset it; white (Jev) has no restrictions. Playing a forbidden point loses at once."
+      : "Forbidden moves bind black only — Jev. Moving first is an advantage, and these rules offset it; you play white and have no restrictions. If Jev plays a forbidden point, it loses.";

@@ -466,3 +466,30 @@
   .how-anim .heat { opacity: var(--o, .5); transform: scale(1); }
   .how-anim .win-box { transform: translateX(calc((100% / 5) * 2)); }
 }
+
+/* English. The spacing above is tuned for the brush + Song pairing; the print
+   faces (IM Fell English / EB Garamond) need tight tracking and a line height
+   closer to book setting. Same pattern as the end of board.css. */
+html[data-lang="en"] .lede { line-height: 1.75; }
+html[data-lang="en"] .sec-tag { letter-spacing: .22em; }
+html[data-lang="en"] .sec h2 { letter-spacing: .005em; line-height: 1.2; }
+html[data-lang="en"] .sec p { line-height: 1.75; }
+html[data-lang="en"] .prim-what { font-size: 14.5px; line-height: 1.6; }
+html[data-lang="en"] .prim-eg { font-size: 13px; line-height: 1.6; }
+html[data-lang="en"] .io-head { letter-spacing: .03em; font-size: 12.5px; }
+html[data-lang="en"] .io-note { font-size: 12.5px; line-height: 1.6; }
+html[data-lang="en"] .split-head { letter-spacing: .02em; font-size: 14px; }
+html[data-lang="en"] .split-col li { font-size: 14px; line-height: 1.6; margin-bottom: 3px; }
+html[data-lang="en"] .how-n { font-size: 19px; }
+html[data-lang="en"] .how-title { letter-spacing: .005em; font-size: 17px; line-height: 1.35; }
+html[data-lang="en"] .how-body { font-size: 14.5px; line-height: 1.7; }
+html[data-lang="en"] .anim-cap { letter-spacing: .01em; font-size: 12.5px; line-height: 1.6; }
+html[data-lang="en"] .chip em { letter-spacing: .01em; font-size: 12px; }
+html[data-lang="en"] .gate { letter-spacing: .02em; font-size: 12.5px; }
+html[data-lang="en"] .price-k { letter-spacing: .03em; font-size: 12.5px; }
+html[data-lang="en"] .price-v small { font-size: 13px; }
+html[data-lang="en"] .back-cta .note { letter-spacing: .01em; font-size: 13px; }
+/* IM Fell's old-style figures make "1" read as a small-cap I in the step discs. */
+html[data-lang="en"] .how-n { font-family: var(--serif); font-variant-numeric: lining-nums; }
+/* A CJK term quoted inside English must not break between its characters. */
+.nw { white-space: nowrap; }

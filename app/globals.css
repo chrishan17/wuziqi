@@ -26,6 +26,15 @@
   --brush: "Ma Shan Zheng", "Kaiti SC", "STKaiti", cursive;
 }
 
+/* English is a different book: 17th-century print. IM Fell English for the
+   display faces, EB Garamond for reading. Chinese glyphs that remain (棋 terms,
+   the seal) fall through to the Song face. */
+html[data-lang="en"] {
+  --serif: "EB Garamond", "Noto Serif SC", Georgia, serif;
+  --brush: "IM Fell English", "EB Garamond", "Noto Serif SC", Georgia, serif;
+}
+html[data-lang="en"] body { font-size: 16.5px; line-height: 1.6; }
+
 * { box-sizing: border-box; }
 
 /* Reserve the scrollbar gutter permanently. Without it, the trace card pushing

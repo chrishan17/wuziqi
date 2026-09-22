@@ -24,6 +24,7 @@ import {
   type Rules,
 } from "@/lib/renju";
 import { RulesExplainer, FORBIDDEN_INTRO } from "./rules-explainer";
+import { LangSwitch, useLang, useT } from "@/lib/i18n";
 import "./board.css";
 
 const SIZE = DEFAULT_SIZE;
@@ -47,11 +48,19 @@ type Status =
   | "jev-forbidden";
 type Splash = { idx: number; key: number };
 
-const FORBIDDEN_ROWS: Array<[keyof Rules, string, string]> = [
-  ["doubleThree", "三三", "同时形成两个活三"],
-  ["doubleFour", "四四", "同时形成两个四"],
-  ["overline", "长连", "六子以上连成一线"],
+/** [rule, short name zh, hint zh, short name en, hint en] */
+const FORBIDDEN_ROWS: Array<[keyof Rules, string, string, string, string]> = [
+  ["doubleThree", "三三", "同时形成两个活三", "Double three", "two open threes at once"],
+  ["doubleFour", "四四", "同时形成两个四", "Double four", "two fours at once"],
+  ["overline", "长连", "六子以上连成一线", "Overline", "six or more in a row"],
 ];
+
+/** English names for the rule a player broke. */
+const RULE_NAME_EN: Record<ForbiddenKind, string> = {
+  doubleThree: "the double-three rule",
+  doubleFour: "the double-four rule",
+  overline: "the overline rule",
+};
 
 /** Keyframe landmarks of `hand-place` (0.9s): the hand reaches the point at 52%,
     and is fully withdrawn at 100%. `setBoard` is held back to HAND_REACH so the
@@ -68,12 +77,13 @@ const reducedMotion = () =>
 
 export default function Page() {
   const [handicap, setHandicap] = useState(0);
-  /** Which colour the human holds. Black opens, so this is the 先/后手 switch. */
-  const [humanColor, setHumanColor] = useState<Player>(BLACK);
+  /** Which colour the human holds. Black opens, so this is the 先/后手 switch.
+      White by default: Jev plays black, the seat its state and ladder are tuned for. */
+  const [humanColor, setHumanColor] = useState<Player>(WHITE);
   const jevColor = other(humanColor);
   const [rules, setRules] = useState<Rules>(FREESTYLE);
-  /** 素盘: tell Jev only the game, its colour, the board, and whether 禁手 is on. */
-  const [brief, setBrief] = useState(false);
+  const t = useT();
+  const { lang } = useLang();
   const [brokeRule, setBrokeRule] = useState<ForbiddenKind | null>(null);
   const [board, setBoard] = useState<Board>(() => createBoard(SIZE));
   // Tagged, not bare labels: `normaliseHistory` in lib/jev.ts infers strict
@@ -95,6 +105,14 @@ export default function Page() {
   // await and bails if the game it belongs to is gone — the colour/handicap/rule
   // buttons stay live while Jev is thinking, and Jev now also opens on reset.
   const gen = useRef(0);
+
+  // The human holds white by default, so Jev (black) opens as soon as the page
+  // loads. Strict mode runs this twice in dev; the second reset bumps `gen` and
+  // the first turn bails.
+  useEffect(() => {
+    reset(0, WHITE, FREESTYLE);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Clear the ink bloom once it has dried, so a repeat tap re-triggers it.
   useEffect(() => {
@@ -131,7 +149,6 @@ export default function Page() {
     historyNow: HistoryEntry[],
     jev: Player,
     rulesNow: Rules,
-    briefNow: boolean,
   ) {
     const mine = gen.current;
     const alive = () => gen.current === mine;
@@ -141,19 +158,19 @@ export default function Page() {
       const res = await fetch(`${BASE_PATH}/api/move`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ board: boardNow, history: historyNow, jev, rules: rulesNow, brief: briefNow }),
+        body: JSON.stringify({ board: boardNow, history: historyNow, jev, rules: rulesNow }),
       });
       const data = await res.json();
       if (!alive()) return;
-      if (!res.ok) return setError(data.error ?? "请求失败");
+      if (!res.ok) return setError(data.error ?? t("Request failed", "请求失败"));
 
-      const t: MoveTrace = data.trace;
-      const afterJev = applyMove(boardNow, t.moveIdx, jev);
+      const tr: MoveTrace = data.trace;
+      const afterJev = applyMove(boardNow, tr.moveIdx, jev);
 
       // Show the thinking before the move: the wash goes down first, on a board
       // that is still empty at the target, so the chosen point lights up at full
       // strength. Then the hand comes in and covers it with the stone.
-      setTrace(t);
+      setTrace(tr);
       if (!reducedMotion()) await sleep(HEAT_DWELL);
       if (!alive()) return;
 
@@ -162,26 +179,26 @@ export default function Page() {
       // believes. `thinking` is still true here, so the board stays disabled.
       if (!reducedMotion()) {
         handShown.current = true;
-        setHand(t.moveIdx);
+        setHand(tr.moveIdx);
         await sleep(HAND_REACH);
         if (!alive()) return;
       }
 
       setBoard(afterJev);
-      setHistory([...historyNow, { move: t.move, player: jev }]);
-      setLastIdx(t.moveIdx);
-      bloom(t.moveIdx);
+      setHistory([...historyNow, { move: tr.move, player: jev }]);
+      setLastIdx(tr.moveIdx);
+      bloom(tr.moveIdx);
       if (data.forbidden) {
         // Only reachable with Jev on black under 禁手. The server already keeps
         // those points out of the option set, so this is the backstop.
         setBrokeRule(data.forbidden as ForbiddenKind);
         setStatus("jev-forbidden");
       } else if (data.won) {
-        setWinLine(findWinLine(afterJev, t.moveIdx));
+        setWinLine(findWinLine(afterJev, tr.moveIdx));
         setStatus("jev-won");
       } else if (afterJev.every((c) => c !== 0)) setStatus("draw");
     } catch (e: any) {
-      if (alive()) setError(e?.message ?? "网络错误");
+      if (alive()) setError(e?.message ?? t("Network error", "网络错误"));
     } finally {
       if (handShown.current) await sleep(HAND_TOTAL - HAND_REACH);
       handShown.current = false;
@@ -219,10 +236,10 @@ export default function Page() {
     }
     if (afterHuman.every((c) => c !== 0)) return setStatus("draw");
 
-    await jevTurn(afterHuman, nextHistory, jevColor, rules, brief);
+    await jevTurn(afterHuman, nextHistory, jevColor, rules);
   }
 
-  function reset(h = handicap, colour: Player = humanColor, r: Rules = rules, b = brief) {
+  function reset(h = handicap, colour: Player = humanColor, r: Rules = rules) {
     gen.current += 1;
     const start = h > 0 ? placeHandicap(createBoard(SIZE), SIZE, colour, h) : createBoard(SIZE);
     const seeded: HistoryEntry[] = [];
@@ -244,12 +261,7 @@ export default function Page() {
     setBrokeRule(null);
     setThinking(false);
     // Black opens. If that is Jev, it moves before the human gets a turn.
-    if (other(colour) === BLACK) void jevTurn(start, seeded, BLACK, r, b);
-  }
-
-  function chooseBrief(next: boolean) {
-    setBrief(next);
-    reset(handicap, humanColor, rules, next);
+    if (other(colour) === BLACK) void jevTurn(start, seeded, BLACK, r);
   }
 
   function toggleRule(k: keyof Rules) {
@@ -265,8 +277,8 @@ export default function Page() {
   // RULE_NAME carries the "…禁手" suffix (for "踩中三三禁手"), which would read
   // "禁手 · 三三禁手" in the summary — use the short labels instead.
   const activeRuleNames = FORBIDDEN_ROWS.filter(([k]) => rules[k])
-    .map(([, name]) => name)
-    .join("、");
+    .map(([, zh, , en]) => t(en, zh))
+    .join(t(", ", "、"));
   // 禁手 binds black only. The crosses say 落此判负 to whoever is clicking, so
   // they are drawn only when the human holds black; when Jev holds black the
   // constraint is real but it is Jev's problem, and the server enforces it.
@@ -285,11 +297,12 @@ export default function Page() {
   return (
     <main className="shell">
       <header className="masthead">
-        <h1>五子棋</h1>
-        <span className="sub">对弈 Jev</span>
+        <h1>{t("Gomoku", "五子棋")}</h1>
+        <span className="sub">{t("against Jev", "对弈 Jev")}</span>
         <Link className="masthead-link" href="/what-is-jev">
-          什么是 Jev
+          {t("What is Jev?", "什么是 Jev")}
         </Link>
+        <LangSwitch />
       </header>
 
       <div className="field">
@@ -312,10 +325,10 @@ export default function Page() {
                     data-edge={edge}
                     onClick={() => play(i)}
                     disabled={status !== "playing" || thinking || v !== 0}
-                    aria-label={`${label}${v === 1 ? " 黑" : v === 2 ? " 白" : ""}`}
+                    aria-label={`${label}${v === 1 ? t(" black", " 黑") : v === 2 ? t(" white", " 白") : ""}`}
                     title={
                       banned.has(i)
-                        ? `${label} · ${RULE_NAME[banned.get(i)!]}，落此判负`
+                        ? t(`${label} · forbidden by ${RULE_NAME_EN[banned.get(i)!]}; playing here loses`, `${label} · ${RULE_NAME[banned.get(i)!]}，落此判负`)
                         : p > 0.005
                           ? `${label} · Jev ${(p * 100).toFixed(1)}%`
                           : label
@@ -383,10 +396,11 @@ export default function Page() {
               <>
                 <h2>
                   <span className="turn-dot" data-w={thinking ? "think" : String(humanColor)} />
-                  {thinking ? "Jev 运思" : "请落子"}
+                  {thinking ? t("Jev is thinking", "Jev 运思") : t("Your move", "请落子")}
                 </h2>
                 <div className="meta">
-                  {humanColor === BLACK ? "你执黑先行" : "你执白后行"} · 已下 {history.length} 手
+                  {humanColor === BLACK ? t("You play black, first", "你执黑先行") : t("You play white, second", "你执白后行")}
+                  {t(` · ${history.length} ${history.length === 1 ? "move" : "moves"}`, ` · 已下 ${history.length} 手`)}
                   {trace ? ` · ${trace.latencyMs}ms` : ""}
                 </div>
               </>
@@ -403,29 +417,32 @@ export default function Page() {
                   }
                 >
                   {status === "human-won" || status === "jev-forbidden"
-                    ? "你胜"
+                    ? t("You win", "你胜")
                     : status === "jev-won"
-                      ? "Jev 胜"
+                      ? t("Jev wins", "Jev 胜")
                       : status === "human-forbidden"
-                        ? "你负"
-                        : "和局"}
+                        ? t("You lose", "你负")
+                        : t("Draw", "和局")}
                 </p>
                 <div className="meta">
                   {brokeRule && (status === "human-forbidden" || status === "jev-forbidden")
-                    ? `${status === "human-forbidden" ? "你" : "Jev"}踩中${RULE_NAME[brokeRule]} · 共 ${history.length} 手`
-                    : `共 ${history.length} 手`}
+                    ? t(
+                        `${status === "human-forbidden" ? "You" : "Jev"} broke ${RULE_NAME_EN[brokeRule]} · ${history.length} ${history.length === 1 ? "move" : "moves"}`,
+                        `${status === "human-forbidden" ? "你" : "Jev"}踩中${RULE_NAME[brokeRule]} · 共 ${history.length} 手`,
+                      )
+                    : t(`${history.length} ${history.length === 1 ? "move" : "moves"}`, `共 ${history.length} 手`)}
                 </div>
               </>
             )}
             </div>
             <div className="dial dial--wide">
-              <button className="btn" onClick={() => reset(handicap)}>重新开局</button>
+              <button className="btn" onClick={() => reset(handicap)}>{t("New game", "重新开局")}</button>
             </div>
           </div>
 
           <div className="card">
-            <h2>对局</h2>
-            <div className="meta">执黑先行。换手即开新局。</div>
+            <h2>{t("Game", "对局")}</h2>
+            <div className="meta">{t("Black moves first. Switching sides starts a new game.", "执黑先行。换手即开新局。")}</div>
             <div className="dial">
               {([BLACK, WHITE] as Player[]).map((c) => (
                 <button
@@ -434,11 +451,11 @@ export default function Page() {
                   data-on={c === humanColor ? 1 : 0}
                   onClick={() => reset(handicap, c)}
                 >
-                  {c === BLACK ? "执黑 · 先" : "执白 · 后"}
+                  {c === BLACK ? t("Black · first", "执黑 · 先") : t("White · second", "执白 · 后")}
                 </button>
               ))}
             </div>
-            <div className="meta" style={{ marginTop: 11 }}>让一子：先替你占住天元</div>
+            <div className="meta" style={{ marginTop: 11 }}>{t("Handicap: you start with the centre point", "让一子：先替你占住天元")}</div>
             <div className="dial">
               {[0, 1].map((h) => (
                 <button
@@ -447,23 +464,9 @@ export default function Page() {
                   data-on={h === handicap ? 1 : 0}
                   onClick={() => reset(h)}
                 >
-                  {h === 0 ? "对等" : "让一子"}
+                  {h === 0 ? t("Even", "对等") : t("One stone", "让一子")}
                 </button>
               ))}
-            </div>
-            <div className="meta" style={{ marginTop: 11 }}>告诉 Jev。换了即开新局。</div>
-            <div className="dial">
-              <button className="btn" data-on={brief ? 0 : 1} onClick={() => chooseBrief(false)}>
-                详注
-              </button>
-              <button className="btn" data-on={brief ? 1 : 0} onClick={() => chooseBrief(true)}>
-                素盘
-              </button>
-            </div>
-            <div className="meta" style={{ marginTop: 8 }}>
-              {brief
-                ? "只说这是五子棋、Jev 执哪一方、当前盘面、有没有禁手。"
-                : "连同盘上的线、落点的作用、先后手的取舍，一并告诉它。"}
             </div>
 
             {/* Uncontrolled on purpose: `rules` always starts FREESTYLE, so the fold
@@ -471,29 +474,29 @@ export default function Page() {
                 the user the moment they unticked the last rule. */}
             <details className="fold">
               <summary>
-                <span className="fold-name">禁手</span>
-                <span className="fold-state">{activeRuleNames || "未启用"}</span>
+                <span className="fold-name">{t("Forbidden moves", "禁手")}</span>
+                <span className="fold-state">{activeRuleNames || t("off", "未启用")}</span>
               </summary>
-            <div className="meta">{FORBIDDEN_INTRO(humanColor === BLACK)}</div>
+            <div className="meta">{FORBIDDEN_INTRO(humanColor === BLACK, lang)}</div>
             <div style={{ marginTop: 10 }}>
-              {FORBIDDEN_ROWS.map(([k, name, hint]) => (
+              {FORBIDDEN_ROWS.map(([k, nameZh, hintZh, nameEn, hintEn]) => (
                 <div key={k}>
                   <label className="rule-row">
                     <input type="checkbox" checked={rules[k]} onChange={() => toggleRule(k)} />
                     <span>
-                      <span className="rule-name">{name}</span>
-                      <span className="rule-hint">{hint}</span>
+                      <span className="rule-name">{t(nameEn, nameZh)}</span>
+                      <span className="rule-hint">{t(hintEn, hintZh)}</span>
                     </span>
                   </label>
-                  {rules[k] && <RulesExplainer kind={k as ForbiddenKind} />}
+                  {rules[k] && <RulesExplainer kind={k as ForbiddenKind} lang={lang} />}
                 </div>
               ))}
             </div>
             {anyRule && (
               <div className="meta" style={{ marginTop: 8 }}>
                 {humanColor === BLACK
-                  ? "棋盘上的朱砂叉即为禁手点，切换规则会立即开新局。"
-                  : "你执白，不受禁手约束；受约束的是 Jev，所以盘上不画朱砂叉。切换规则会立即开新局。"}
+                  ? t("The cinnabar crosses mark forbidden points. Changing a rule starts a new game.", "棋盘上的朱砂叉即为禁手点，切换规则会立即开新局。")
+                  : t("You play white and are not restricted; Jev is, so no crosses are drawn. Changing a rule starts a new game.", "你执白，不受禁手约束；受约束的是 Jev，所以盘上不画朱砂叉。切换规则会立即开新局。")}
               </div>
             )}
             </details>
@@ -501,7 +504,7 @@ export default function Page() {
 
           {error && (
             <div className="card alarm">
-              <h2>出错</h2>
+              <h2>{t("Error", "出错")}</h2>
               <div className="meta">{error}</div>
             </div>
           )}
@@ -510,7 +513,7 @@ export default function Page() {
             <div className="card">
               <h2>{trace.move}</h2>
               <div className="meta">
-                Jev 此手 · 全盘 {trace.optionCount} 个空点中选出 · {brief ? "素盘" : "详注"}
+                {t(`Jev's move · chosen from all ${trace.optionCount} empty points`, `Jev 此手 · 全盘 ${trace.optionCount} 个空点中选出`)}
               </div>
 
               <div className="bars">
@@ -537,9 +540,9 @@ export default function Page() {
                     />
                   </div>
                   <div className="scale-ends">
-                    <span>你优</span>
-                    <span>均势</span>
-                    <span>Jev 优</span>
+                    <span>{t("You ahead", "你优")}</span>
+                    <span>{t("Even", "均势")}</span>
+                    <span>{t("Jev ahead", "Jev 优")}</span>
                   </div>
                 </div>
               )}

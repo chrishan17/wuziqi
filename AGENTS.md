@@ -22,7 +22,7 @@ With both fixed, Jev beats the threat-aware opponent 3-0 at even and holds to a 
 Watch out for: `critical_points` precision. Listing every empty in a window instead of the ones
 adjacent to the stones' span dropped accuracy from 100% to 60%. Dilution costs as much as absence.
 
-`app/api/move/route.ts` plays 详注 (`informed: true`) unless the page asks for 素盘. The naked
+`app/api/move/route.ts` plays 详注 (`informed: true`) unless a caller sends `brief` (the page no longer can). The naked
 convention — neither of those — is no longer reachable from the UI and survives only as a
 measurement baseline in `scripts/`. It logs every UI move to `runs/ui-<date>.jsonl` (local only).
 
@@ -287,6 +287,21 @@ Measured two ways, and the honest answer is mixed:
 Cost: +6% input tokens (3378 → 3584), no latency change.
 
 L2 is a poor proxy for a human, and this was never measured against one.
+
+## UI defaults (2026-09-23)
+
+- **The human plays white by default; Jev plays black and opens on page load** (`useEffect` ->
+  `reset(0, WHITE)` in `app/page.tsx`). Black is the seat the state and `PRIORITY_KEY_LEAVES` are
+  tuned for.
+- **English by default, 中文 on a switch** (`lib/i18n.tsx`: `LangProvider`, `useT()` for client
+  components, `<L en zh>` for server components, `<LangSwitch />`). The choice is stored in
+  `localStorage` (`wuziqi-lang`) and mirrored on `<html data-lang>`; an inline script in
+  `app/layout.tsx` sets it before first paint. **Fonts follow `data-lang`**: English uses IM Fell
+  English (display) + EB Garamond (body); Chinese keeps Ma Shan Zheng + Noto Serif SC. The Chinese
+  brush face needs wide letter-spacing and the English print face does not — overrides sit under
+  `html[data-lang="en"]` at the end of `board.css`.
+- **The 详注 / 素盘 switch is gone from the page.** The page always sends 详注. `/api/move` still
+  accepts `brief: true`, and `buildBriefState` stays, as a measurement baseline for `scripts/`.
 
 ## 素盘
 

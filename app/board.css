@@ -577,3 +577,30 @@
   color: var(--cinnabar);
   border-bottom-color: rgba(163, 46, 36, .5);
 }
+
+/* EN / 中文 switch, beside the explainer link. */
+.lang-switch {
+  font: inherit;
+  font-size: clamp(11px, 2.6vw, 13px);
+  letter-spacing: .12em;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 2px 9px;
+  cursor: pointer;
+  transition: color .18s ease, border-color .18s ease;
+}
+.lang-switch:hover { color: var(--cinnabar); border-color: rgba(163, 46, 36, .5); }
+
+/* The brush face needs its letter-spacing; the English print face does not. */
+html[data-lang="en"] .masthead h1 { letter-spacing: 0.01em; }
+html[data-lang="en"] .masthead .sub { letter-spacing: 0.08em; font-style: italic; }
+html[data-lang="en"] .masthead-link { letter-spacing: .04em; }
+html[data-lang="en"] :is(.meta, .btn, .card h2, .fold-name, .fold-state, .rule-name, .explain-head, .explain-legend, .scale-ends) {
+  letter-spacing: .01em;
+}
+html[data-lang="en"] .meta { font-size: 13.5px; }
+html[data-lang="en"] .dial .btn, html[data-lang="en"] .dial--wide .btn { font-size: 14px; }
+html[data-lang="en"] .scale-ends { font-size: 12.5px; }
+html[data-lang="en"] .verdict { letter-spacing: .02em; }
